@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === FONT LOADING === */
+@import url('https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&f[]=cabinet-grotesk@700,800&display=swap');
+
+/* === DESIGN TOKENS === */
+:root {
+  /* Construction/industrial palette — dark charcoal + amber/orange accent */
+  --background: 220 14% 10%;
+  --foreground: 30 8% 90%;
+  --card: 220 12% 13%;
+  --card-foreground: 30 8% 90%;
+  --popover: 220 12% 13%;
+  --popover-foreground: 30 8% 90%;
+  --primary: 28 95% 52%;
+  --primary-foreground: 220 14% 10%;
+  --secondary: 220 10% 18%;
+  --secondary-foreground: 30 8% 75%;
+  --muted: 220 10% 18%;
+  --muted-foreground: 220 8% 55%;
+  --accent: 220 10% 22%;
+  --accent-foreground: 30 8% 90%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 10% 20%;
+  --input: 220 10% 20%;
+  --ring: 28 95% 52%;
+  --radius: 0.5rem;
+
+  /* Status colors */
+  --status-pending: 220 14% 55%;
+  --status-inprogress: 28 95% 52%;
+  --status-completed: 142 60% 42%;
+  --status-onhold: 45 90% 55%;
+
+  /* Font families */
+  --font-display: 'Cabinet Grotesk', 'General Sans', sans-serif;
+  --font-body: 'General Sans', sans-serif;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+}
+
+/* Force dark theme (construction app is dark-first) */
+.dark {
+  --background: 220 14% 10%;
+  --foreground: 30 8% 90%;
+  --card: 220 12% 13%;
+  --card-foreground: 30 8% 90%;
+  --popover: 220 12% 13%;
+  --popover-foreground: 30 8% 90%;
+  --primary: 28 95% 52%;
+  --primary-foreground: 220 14% 10%;
+  --secondary: 220 10% 18%;
+  --secondary-foreground: 30 8% 75%;
+  --muted: 220 10% 18%;
+  --muted-foreground: 220 8% 55%;
+  --accent: 220 10% 22%;
+  --accent-foreground: 30 8% 90%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 10% 20%;
+  --input: 220 10% 20%;
+  --ring: 28 95% 52%;
+}
+
+/* === BASE RESET === */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  min-height: 100dvh;
+  line-height: 1.6;
+}
+
+/* === CUSTOM UTILITIES === */
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Status badge styles */
+.status-pending {
+  @apply bg-slate-700 text-slate-300;
+}
+.status-in_progress {
+  @apply bg-orange-500/20 text-orange-400 border border-orange-500/30;
+}
+.status-completed {
+  @apply bg-green-500/20 text-green-400 border border-green-500/30;
+}
+.status-on_hold {
+  @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30;
+}
+
+/* Subtle row hover */
+.job-row {
+  transition: background-color 150ms ease;
+}
+.job-row:hover {
+  @apply bg-white/5;
+}
