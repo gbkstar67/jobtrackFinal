@@ -30,7 +30,7 @@ export default function CodePicker<T extends string>({
             data-testid={testId ? `${testId}-${code}` : undefined}
             aria-pressed={selected}
             onClick={() => onChange(selected ? null : code)}
-            className={`rounded-md border px-3 py-2 text-left transition-colors ${
+            className={`rounded-md border px-2.5 py-2 text-left transition-colors ${
               selected
                 ? "border-primary bg-primary/15 text-foreground"
                 : "border-border bg-secondary text-muted-foreground hover:text-foreground hover:border-muted-foreground/40"
@@ -39,7 +39,9 @@ export default function CodePicker<T extends string>({
             <span className={`block font-mono text-sm font-bold ${selected ? "text-primary" : ""}`}>
               {code}
             </span>
-            <span className="block text-xs leading-tight mt-0.5">{label}</span>
+            <span className="block text-[10px] leading-tight mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
+              {label}
+            </span>
           </button>
         );
       })}

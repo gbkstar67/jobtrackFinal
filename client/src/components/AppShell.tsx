@@ -9,6 +9,7 @@ import {
   ActivityIcon,
   LogOutIcon,
 } from "lucide-react";
+import { HLTBadge, FadeBar, Wordmark, CompanyLine } from "@/components/Brand";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-emerald-500", "bg-blue-500", "bg-purple-500",
@@ -37,23 +38,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen text-foreground">
       {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+      <header className="rule-blue bg-card/95 backdrop-blur-sm sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
           {/* Logo + Nav */}
           <div className="flex items-center gap-6">
-            <Link href="/" className="flex items-center gap-3 no-underline">
-              <svg aria-label="JobTrack logo" viewBox="0 0 36 36" fill="none" className="w-8 h-8 flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
-                <rect width="36" height="36" rx="8" fill="hsl(28 95% 52%)" />
-                <rect x="9" y="10" width="18" height="3" rx="1.5" fill="hsl(220 14% 10%)" />
-                <rect x="9" y="16.5" width="12" height="3" rx="1.5" fill="hsl(220 14% 10%)" />
-                <rect x="9" y="23" width="15" height="3" rx="1.5" fill="hsl(220 14% 10%)" />
-                <circle cx="26" cy="25" r="5" fill="hsl(220 14% 10%)" />
-                <path d="M23.5 25l1.5 1.5L28 23" stroke="hsl(28 95% 52%)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span className="font-display text-lg font-bold text-foreground leading-none tracking-tight hidden sm:block">
-                JobTrack
+            <Link href="/" className="flex items-center gap-3 no-underline group">
+              <HLTBadge className="w-10 h-10 flex-shrink-0" />
+              <span className="hidden sm:flex flex-col gap-1">
+                <Wordmark className="text-xl" />
+                <span className="flex items-center gap-2">
+                  <FadeBar className="h-[9px] w-[46px]" />
+                  <CompanyLine className="text-[9px]" />
+                </span>
               </span>
             </Link>
 
@@ -66,10 +64,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 return (
                   <Link key={item.href} href={item.href}>
                     <span
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-md transition-colors cursor-pointer ${
                         isActive
-                          ? "bg-primary/15 text-primary"
-                          : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-primary hover:bg-accent"
                       }`}
                     >
                       <item.icon className="w-4 h-4" />
@@ -112,9 +110,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
         {children}
       </main>
+
+      <footer className="max-w-7xl mx-auto px-4 sm:px-6 pb-8 pt-2 flex items-center gap-3">
+        <FadeBar className="h-[10px] w-[52px]" color="hsl(var(--border))" />
+        <CompanyLine className="text-[10px]" />
+      </footer>
     </div>
   );
 }

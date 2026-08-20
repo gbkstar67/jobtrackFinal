@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LoaderCircleIcon } from "lucide-react";
+import { HLTBadge, FadeBar, Wordmark, CompanyLine } from "@/components/Brand";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -45,24 +46,20 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex items-center justify-center px-4">
+    <div className="min-h-screen text-foreground flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <svg aria-label="JobTrack logo" viewBox="0 0 36 36" fill="none" className="w-12 h-12 mb-3" xmlns="http://www.w3.org/2000/svg">
-            <rect width="36" height="36" rx="8" fill="hsl(28 95% 52%)" />
-            <rect x="9" y="10" width="18" height="3" rx="1.5" fill="hsl(220 14% 10%)" />
-            <rect x="9" y="16.5" width="12" height="3" rx="1.5" fill="hsl(220 14% 10%)" />
-            <rect x="9" y="23" width="15" height="3" rx="1.5" fill="hsl(220 14% 10%)" />
-            <circle cx="26" cy="25" r="5" fill="hsl(220 14% 10%)" />
-            <path d="M23.5 25l1.5 1.5L28 23" stroke="hsl(28 95% 52%)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <h1 className="font-display text-2xl font-bold tracking-tight">JobTrack</h1>
-          <p className="text-sm text-muted-foreground mt-1">Sign in to continue</p>
+          <HLTBadge className="w-16 h-16 mb-4" />
+          <Wordmark className="text-3xl" />
+          <div className="flex items-center gap-2 mt-2">
+            <FadeBar className="h-[10px] w-[52px]" />
+            <CompanyLine className="text-[10px]" />
+          </div>
         </div>
 
-        <form onSubmit={onSubmit} className="bg-card border border-border rounded-lg p-6 space-y-4">
+        <form onSubmit={onSubmit} className="sheet-card p-6 space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="username" className="text-sm font-medium">Username</Label>
+            <Label htmlFor="username" className="label-caps">Username</Label>
             <Input
               id="username"
               data-testid="input-username"
@@ -70,12 +67,12 @@ export default function Login() {
               autoFocus
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="bg-secondary border-border text-foreground"
+              className="bg-background border-border text-foreground"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="password" className="text-sm font-medium">Password</Label>
+            <Label htmlFor="password" className="label-caps">Password</Label>
             <Input
               id="password"
               data-testid="input-password"
@@ -83,7 +80,7 @@ export default function Login() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="bg-secondary border-border text-foreground"
+              className="bg-background border-border text-foreground"
             />
           </div>
 
@@ -97,7 +94,7 @@ export default function Login() {
             type="submit"
             data-testid="button-login"
             disabled={login.isPending || !username || !password}
-            className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-semibold gap-2"
+            className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-bold gap-2 tracking-wide"
           >
             {login.isPending && <LoaderCircleIcon className="w-4 h-4 animate-spin" />}
             {login.isPending ? "Signing in..." : "Sign In"}

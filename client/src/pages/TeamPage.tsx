@@ -144,7 +144,7 @@ export default function TeamPage() {
     <AppShell>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-xl font-bold text-foreground">Team</h1>
+          <h1 className="font-display text-2xl font-extrabold text-foreground uppercase tracking-tight">Team</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {employees.filter((e) => e.active).length} active members
           </p>
@@ -152,7 +152,7 @@ export default function TeamPage() {
         <Button
           data-testid="button-add-employee"
           onClick={openCreate}
-          className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold gap-2"
+          className="bg-primary text-primary-foreground hover:bg-primary/90 font-bold gap-2 tracking-wide"
         >
           <PlusIcon className="w-4 h-4" />
           Add Member
@@ -171,7 +171,7 @@ export default function TeamPage() {
           <p className="text-muted-foreground font-medium mb-4">
             No team members yet. Add your crew to start assigning jobs.
           </p>
-          <Button onClick={openCreate} className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2">
+          <Button onClick={openCreate} className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2 font-bold tracking-wide">
             <PlusIcon className="w-4 h-4" /> Add First Member
           </Button>
         </div>
@@ -276,7 +276,7 @@ export default function TeamPage() {
                 <FormItem>
                   <FormLabel className="text-sm font-medium text-foreground">Name *</FormLabel>
                   <FormControl>
-                    <Input data-testid="input-emp-name" placeholder="Full name" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} />
+                    <Input data-testid="input-emp-name" placeholder="Full name" className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -286,7 +286,7 @@ export default function TeamPage() {
                 <FormItem>
                   <FormLabel className="text-sm font-medium text-foreground">Role / Title</FormLabel>
                   <FormControl>
-                    <Input data-testid="input-emp-role" placeholder="e.g. Foreman, Electrician..." className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
+                    <Input data-testid="input-emp-role" placeholder="e.g. Foreman, Electrician..." className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
                   </FormControl>
                 </FormItem>
               )} />
@@ -296,7 +296,7 @@ export default function TeamPage() {
                   <FormItem>
                     <FormLabel className="text-sm font-medium text-foreground">Phone</FormLabel>
                     <FormControl>
-                      <Input data-testid="input-emp-phone" placeholder="(555) 000-0000" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
+                      <Input data-testid="input-emp-phone" placeholder="(555) 000-0000" className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
                     </FormControl>
                   </FormItem>
                 )} />
@@ -304,7 +304,7 @@ export default function TeamPage() {
                   <FormItem>
                     <FormLabel className="text-sm font-medium text-foreground">Email</FormLabel>
                     <FormControl>
-                      <Input data-testid="input-emp-email" placeholder="email@example.com" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
+                      <Input data-testid="input-emp-email" placeholder="email@example.com" className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
                     </FormControl>
                   </FormItem>
                 )} />
@@ -337,7 +337,7 @@ export default function TeamPage() {
                 <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="text-muted-foreground hover:text-foreground">
                   Cancel
                 </Button>
-                <Button type="submit" data-testid="button-submit-employee" disabled={createMutation.isPending || updateMutation.isPending} className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold">
+                <Button type="submit" data-testid="button-submit-employee" disabled={createMutation.isPending || updateMutation.isPending} className="bg-primary text-primary-foreground hover:bg-primary/90 font-bold tracking-wide">
                   {editingId ? "Save Changes" : "Add Member"}
                 </Button>
               </div>

@@ -37,6 +37,7 @@ import {
   type Job, type InsertJob, type Employee, type BidBy, type BillingType,
 } from "@shared/schema";
 import CodePicker, { CodeBadge } from "@/components/CodePicker";
+import { FadeBar } from "@/components/Brand";
 import { z } from "zod";
 import {
   PlusIcon,
@@ -131,12 +132,12 @@ export default function Dashboard() {
             placeholder="Search by job number, name, or client..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 bg-card border-border text-foreground placeholder:text-muted-foreground"
+            className="pl-9 bg-card border-border text-foreground placeholder:text-muted-foreground shadow-sm"
           />
         </div>
         {activeEmployees.length > 0 && (
           <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
-            <SelectTrigger data-testid="select-assignee-filter" className="w-full sm:w-44 bg-card border-border text-foreground">
+            <SelectTrigger data-testid="select-assignee-filter" className="w-full sm:w-44 bg-card border-border text-foreground shadow-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-card border-border text-foreground">
@@ -157,22 +158,22 @@ export default function Dashboard() {
         )}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button data-testid="button-new-job" className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold gap-2">
+            <Button data-testid="button-new-job" className="bg-primary text-primary-foreground hover:bg-primary/90 font-bold gap-2 shadow-sm tracking-wide">
               <PlusIcon className="w-4 h-4" />
               New Job
             </Button>
           </DialogTrigger>
           <DialogContent className="bg-card border-border text-foreground max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="font-display text-lg font-bold">Add New Job</DialogTitle>
+              <DialogTitle className="font-display text-lg font-extrabold uppercase tracking-widest">Add New Job</DialogTitle>
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 mt-2">
                 <FormField control={form.control} name="jobName" render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-sm font-medium text-foreground">Job Name *</FormLabel>
+                    <FormLabel className="label-caps">Job Name *</FormLabel>
                     <FormControl>
-                      <Input data-testid="input-job-name" placeholder="e.g. Kitchen remodel, Foundation pour..." className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} />
+                      <Input data-testid="input-job-name" placeholder="e.g. Kitchen remodel, Foundation pour..." className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -180,9 +181,9 @@ export default function Dashboard() {
 
                 <FormField control={form.control} name="clientName" render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-sm font-medium text-foreground">Client Name *</FormLabel>
+                    <FormLabel className="label-caps">Client Name *</FormLabel>
                     <FormControl>
-                      <Input data-testid="input-client-name" placeholder="Full name or company" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} />
+                      <Input data-testid="input-client-name" placeholder="Full name or company" className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -191,17 +192,17 @@ export default function Dashboard() {
                 <div className="grid grid-cols-2 gap-3">
                   <FormField control={form.control} name="clientPhone" render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Phone</FormLabel>
+                      <FormLabel className="label-caps">Phone</FormLabel>
                       <FormControl>
-                        <Input data-testid="input-client-phone" placeholder="(555) 000-0000" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
+                        <Input data-testid="input-client-phone" placeholder="(555) 000-0000" className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
                       </FormControl>
                     </FormItem>
                   )} />
                   <FormField control={form.control} name="clientEmail" render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Email</FormLabel>
+                      <FormLabel className="label-caps">Email</FormLabel>
                       <FormControl>
-                        <Input data-testid="input-client-email" placeholder="email@example.com" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
+                        <Input data-testid="input-client-email" placeholder="email@example.com" className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
                       </FormControl>
                     </FormItem>
                   )} />
@@ -209,9 +210,9 @@ export default function Dashboard() {
 
                 <FormField control={form.control} name="clientAddress" render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-sm font-medium text-foreground">Job Site Address</FormLabel>
+                    <FormLabel className="label-caps">Job Site Address</FormLabel>
                     <FormControl>
-                      <Input data-testid="input-client-address" placeholder="Street address" className="bg-secondary border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
+                      <Input data-testid="input-client-address" placeholder="Street address" className="bg-background border-border text-foreground placeholder:text-muted-foreground" {...field} value={field.value ?? ""} />
                     </FormControl>
                   </FormItem>
                 )} />
@@ -219,9 +220,9 @@ export default function Dashboard() {
                 <div className="grid grid-cols-2 gap-3">
                   <FormField control={form.control} name="startDate" render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Start Date</FormLabel>
+                      <FormLabel className="label-caps">Start Date</FormLabel>
                       <FormControl>
-                        <Input data-testid="input-start-date" type="date" className="bg-secondary border-border text-foreground" {...field} value={field.value ?? ""} />
+                        <Input data-testid="input-start-date" type="date" className="bg-background border-border text-foreground" {...field} value={field.value ?? ""} />
                       </FormControl>
                     </FormItem>
                   )} />
@@ -229,13 +230,13 @@ export default function Dashboard() {
                   {activeEmployees.length > 0 && (
                     <FormField control={form.control} name="assignedTo" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-sm font-medium text-foreground">Assign To</FormLabel>
+                        <FormLabel className="label-caps">Assign To</FormLabel>
                         <Select
                           onValueChange={(val) => field.onChange(val === "none" ? null : parseInt(val, 10))}
                           value={field.value ? String(field.value) : "none"}
                         >
                           <FormControl>
-                            <SelectTrigger data-testid="select-assign" className="bg-secondary border-border text-foreground">
+                            <SelectTrigger data-testid="select-assign" className="bg-background border-border text-foreground">
                               <SelectValue placeholder="Select..." />
                             </SelectTrigger>
                           </FormControl>
@@ -261,7 +262,7 @@ export default function Dashboard() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField control={form.control} name="bidBy" render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Who bid this job?</FormLabel>
+                      <FormLabel className="label-caps">Who bid this job?</FormLabel>
                       <CodePicker<BidBy>
                         testId="picker-bid-by"
                         value={field.value as BidBy | null}
@@ -276,7 +277,7 @@ export default function Dashboard() {
 
                   <FormField control={form.control} name="billingType" render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Contract or Time &amp; Material?</FormLabel>
+                      <FormLabel className="label-caps">Contract or Time &amp; Material?</FormLabel>
                       <CodePicker<BillingType>
                         testId="picker-billing-type"
                         value={field.value as BillingType | null}
@@ -292,16 +293,16 @@ export default function Dashboard() {
 
                 <FormField control={form.control} name="notes" render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-sm font-medium text-foreground">Notes</FormLabel>
+                    <FormLabel className="label-caps">Notes</FormLabel>
                     <FormControl>
-                      <Textarea data-testid="input-notes" placeholder="Scope of work, special instructions..." className="bg-secondary border-border text-foreground placeholder:text-muted-foreground resize-none" rows={3} {...field} value={field.value ?? ""} />
+                      <Textarea data-testid="input-notes" placeholder="Scope of work, special instructions..." className="bg-background border-border text-foreground placeholder:text-muted-foreground resize-none" rows={3} {...field} value={field.value ?? ""} />
                     </FormControl>
                   </FormItem>
                 )} />
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} className="text-muted-foreground hover:text-foreground">Cancel</Button>
-                  <Button type="submit" data-testid="button-submit-job" disabled={createMutation.isPending} className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold">
+                  <Button type="submit" data-testid="button-submit-job" disabled={createMutation.isPending} className="bg-primary text-primary-foreground hover:bg-primary/90 font-bold tracking-wide">
                     {createMutation.isPending ? "Creating..." : "Create Job"}
                   </Button>
                 </div>
@@ -312,10 +313,15 @@ export default function Dashboard() {
       </div>
 
       {/* Jobs Table */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="font-display font-bold text-sm text-foreground uppercase tracking-wide">Jobs</h2>
-          <span className="text-xs text-muted-foreground">{filteredJobs.length} of {jobs.length}</span>
+      <div className="sheet-card overflow-hidden">
+        <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: "hsl(var(--navy))" }}>
+          <div className="flex items-center gap-3">
+            <h2 className="font-display font-extrabold text-sm text-white uppercase tracking-widest">Job Log</h2>
+            <FadeBar className="h-[9px] w-[46px] opacity-70" color="hsl(var(--primary-foreground))" />
+          </div>
+          <span className="font-mono text-xs text-white/70">
+            {filteredJobs.length} / {jobs.length}
+          </span>
         </div>
 
         {isLoading ? (
@@ -329,7 +335,7 @@ export default function Dashboard() {
               {jobs.length === 0 ? "No jobs yet. Add your first job." : "No jobs match your filters."}
             </p>
             {jobs.length === 0 && (
-              <Button onClick={() => setDialogOpen(true)} className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90 gap-2">
+              <Button onClick={() => setDialogOpen(true)} className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90 gap-2 font-bold tracking-wide">
                 <PlusIcon className="w-4 h-4" /> Add First Job
               </Button>
             )}
@@ -337,12 +343,12 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Desktop header */}
-            <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_90px_100px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/30">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Job #</span>
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Job Name</span>
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client</span>
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Bid / Type</span>
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assigned</span>
+            <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_90px_100px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/60">
+              <span className="label-caps">Job #</span>
+              <span className="label-caps">Job Name</span>
+              <span className="label-caps">Client</span>
+              <span className="label-caps">Bid / Type</span>
+              <span className="label-caps">Assigned</span>
               <span className="sr-only">Go</span>
             </div>
 
@@ -353,7 +359,7 @@ export default function Dashboard() {
                   <button key={job.id} data-testid={`row-job-${job.id}`} onClick={() => navigate(`/job/${job.id}`)} className="job-row w-full text-left">
                     {/* Desktop */}
                     <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_90px_100px_28px] gap-3 px-4 py-3.5 items-center">
-                      <span data-testid={`text-job-number-${job.id}`} className="font-mono text-sm font-semibold text-primary">{job.jobNumber}</span>
+                      <span data-testid={`text-job-number-${job.id}`} className="font-mono text-sm font-bold text-primary tracking-tight">{job.jobNumber}</span>
                       <span className="text-sm font-medium text-foreground truncate">{job.jobName}</span>
                       <div className="flex items-center gap-2 min-w-0">
                         <UserIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
@@ -381,8 +387,8 @@ export default function Dashboard() {
                     <div className="sm:hidden px-4 py-3.5">
                       <div className="flex items-start justify-between gap-2 mb-1.5">
                         <div className="min-w-0">
-                          <span className="font-mono text-xs font-bold text-primary block">{job.jobNumber}</span>
-                          <span className="text-sm font-medium text-foreground">{job.jobName}</span>
+                          <span className="font-mono text-xs font-bold text-primary block tracking-tight">{job.jobNumber}</span>
+                          <span className="label-caps">{job.jobName}</span>
                         </div>
                         {assignee && (
                           <span className={`w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center text-white flex-shrink-0 ${assignee.color}`} title={assignee.name}>

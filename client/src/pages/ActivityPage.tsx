@@ -57,13 +57,13 @@ export default function ActivityPage() {
   return (
     <AppShell>
       <div>
-        <h1 className="font-display text-xl font-bold text-foreground">Activity Log</h1>
+        <h1 className="font-display text-2xl font-extrabold text-foreground uppercase tracking-tight">Activity Log</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Track every change across all jobs
         </p>
       </div>
 
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
+      <div className="sheet-card overflow-hidden">
         {isLoading ? (
           <div className="p-8 space-y-3">
             {[1, 2, 3, 4, 5].map((i) => (

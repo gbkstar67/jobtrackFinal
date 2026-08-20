@@ -53,7 +53,7 @@ function AuthGate() {
   // Blank rather than a flash of the login form while the session check is
   // still in flight — otherwise every hard refresh flickers through it.
   if (isLoading) {
-    return <div className="min-h-screen bg-background" />;
+    return <div className="min-h-screen" />;
   }
 
   return user ? <AuthenticatedApp /> : <Login />;
@@ -62,10 +62,8 @@ function AuthGate() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="dark">
-        <AuthGate />
-        <Toaster />
-      </div>
+      <AuthGate />
+      <Toaster />
     </QueryClientProvider>
   );
 }
