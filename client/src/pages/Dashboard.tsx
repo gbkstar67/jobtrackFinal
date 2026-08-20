@@ -3,7 +3,6 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { useCurrentUser } from "@/App";
 import AppShell from "@/components/AppShell";
 import { AVATAR_COLORS, getInitials } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -65,7 +64,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const { currentUser } = useCurrentUser();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
@@ -109,8 +107,9 @@ export default function Dashboard() {
   });
 
   const onSubmit = (data: FormData) => {
+    // createdBy is deliberately not sent: the server reads the actor from the
+    // session, so a client can't file a job under someone else's name.
     const payload: any = { ...data };
-    if (currentUser) payload.createdBy = currentUser.id;
     if (payload.assignedTo === null || payload.assignedTo === "none") payload.assignedTo = null;
     else payload.assignedTo = parseInt(payload.assignedTo as any, 10);
     createMutation.mutate(payload as InsertJob);

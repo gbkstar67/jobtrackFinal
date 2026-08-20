@@ -3,7 +3,6 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useLocation, useParams } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { useCurrentUser } from "@/App";
 import AppShell from "@/components/AppShell";
 import { getInitials } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -99,7 +98,6 @@ export default function JobDetail() {
   const params = useParams<{ id: string }>();
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const { currentUser } = useCurrentUser();
   const [isEditing, setIsEditing] = useState(false);
 
   const id = parseInt(params.id, 10);
@@ -139,7 +137,7 @@ export default function JobDetail() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: Partial<EditData> & { _changedBy?: number }) =>
+    mutationFn: (data: Partial<EditData>) =>
       apiRequest("PATCH", `/api/jobs/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
@@ -165,8 +163,8 @@ export default function JobDetail() {
   });
 
   const onSubmit = (data: EditData) => {
+    // No _changedBy: attribution is read from the session server-side.
     const payload: any = { ...data };
-    if (currentUser) payload._changedBy = currentUser.id;
     if (payload.assignedTo === "none" || payload.assignedTo === null) payload.assignedTo = null;
     else if (typeof payload.assignedTo === "string") payload.assignedTo = parseInt(payload.assignedTo, 10);
     updateMutation.mutate(payload);

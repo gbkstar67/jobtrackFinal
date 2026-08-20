@@ -1,44 +1,71 @@
-import { useState, createContext, useContext } from "react";
 import { Switch, Route, Router } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { queryClient } from "./lib/queryClient";
+import { queryClient, getQueryFn, ME_KEY } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import Dashboard from "./pages/Dashboard";
 import JobDetail from "./pages/JobDetail";
 import TeamPage from "./pages/TeamPage";
 import ActivityPage from "./pages/ActivityPage";
+import Login from "./pages/Login";
 import NotFound from "./pages/not-found";
 import type { Employee } from "@shared/schema";
 
-// ── Current User Context ──
-// Persisted in React state (not localStorage, per sandbox rules)
-interface UserCtx {
-  currentUser: Employee | null;
-  setCurrentUser: (e: Employee | null) => void;
+// ── Current User ──
+// Identity comes from the server session, not from React state. The old
+// UserContext held a who-am-I <Select> value that reset on every refresh, so
+// createdBy silently became null and the activity log filled up with
+// "Someone created job X". The server now reads the actor from req.user.
+export function useCurrentUser(): Employee | null {
+  const { data } = useQuery<Employee | null>({
+    queryKey: ME_KEY,
+    queryFn: getQueryFn({ on401: "returnNull" }),
+    staleTime: Infinity,
+    retry: false,
+  });
+  return data ?? null;
 }
-const UserContext = createContext<UserCtx>({ currentUser: null, setCurrentUser: () => {} });
-export const useCurrentUser = () => useContext(UserContext);
+
+function AuthenticatedApp() {
+  return (
+    <Router hook={useHashLocation}>
+      <Switch>
+        <Route path="/" component={Dashboard} />
+        <Route path="/job/:id" component={JobDetail} />
+        <Route path="/team" component={TeamPage} />
+        <Route path="/activity" component={ActivityPage} />
+        {/* Already signed in and pointed at /login: send them to the board. */}
+        <Route path="/login" component={Dashboard} />
+        <Route component={NotFound} />
+      </Switch>
+    </Router>
+  );
+}
+
+function AuthGate() {
+  const { data: user, isLoading } = useQuery<Employee | null>({
+    queryKey: ME_KEY,
+    queryFn: getQueryFn({ on401: "returnNull" }),
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  // Blank rather than a flash of the login form while the session check is
+  // still in flight — otherwise every hard refresh flickers through it.
+  if (isLoading) {
+    return <div className="min-h-screen bg-background" />;
+  }
+
+  return user ? <AuthenticatedApp /> : <Login />;
+}
 
 function App() {
-  const [currentUser, setCurrentUser] = useState<Employee | null>(null);
-
   return (
     <QueryClientProvider client={queryClient}>
-      <UserContext.Provider value={{ currentUser, setCurrentUser }}>
-        <div className="dark">
-          <Router hook={useHashLocation}>
-            <Switch>
-              <Route path="/" component={Dashboard} />
-              <Route path="/job/:id" component={JobDetail} />
-              <Route path="/team" component={TeamPage} />
-              <Route path="/activity" component={ActivityPage} />
-              <Route component={NotFound} />
-            </Switch>
-          </Router>
-          <Toaster />
-        </div>
-      </UserContext.Provider>
+      <div className="dark">
+        <AuthGate />
+        <Toaster />
+      </div>
     </QueryClientProvider>
   );
 }

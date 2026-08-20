@@ -12,15 +12,44 @@ export const employees = sqliteTable("employees", {
   color: text("color").notNull(),  // avatar color for quick visual ID
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull(),
+
+  // ── Auth ──
+  // Employees and users are the same four people, so login lives on this table
+  // rather than a separate users table. Both columns are null for employees who
+  // are crew-only and never sign in. Seeded by script/seed-users.ts; there is no
+  // self-service signup, so neither column is writable through the API.
+  username: text("username"),
+  passwordHash: text("password_hash"),
 });
 
+// Note the omits: username and passwordHash are deliberately NOT part of the
+// insert schema, so POST/PATCH /api/employees can never set a login or a hash.
 export const insertEmployeeSchema = createInsertSchema(employees).omit({
   id: true,
   createdAt: true,
+  username: true,
+  passwordHash: true,
 });
 
+// What the API is allowed to send to the browser. Employee rows now carry a
+// password hash, and db.select().from(employees) would happily serialise it,
+// so every read path projects through this column list instead.
+export const employeePublicColumns = {
+  id: employees.id,
+  name: employees.name,
+  role: employees.role,
+  phone: employees.phone,
+  email: employees.email,
+  color: employees.color,
+  active: employees.active,
+  createdAt: employees.createdAt,
+  username: employees.username,
+} as const;
+
 export type InsertEmployee = z.infer<typeof insertEmployeeSchema>;
-export type Employee = typeof employees.$inferSelect;
+export type EmployeeRow = typeof employees.$inferSelect;
+/** An employee as the client ever sees one — never includes passwordHash. */
+export type Employee = Omit<EmployeeRow, "passwordHash">;
 
 // ── Jobs ──
 export const jobs = sqliteTable("jobs", {

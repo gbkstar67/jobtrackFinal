@@ -1,9 +1,71 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import passport from "passport";
 import { storage } from "./storage";
-import { insertJobSchema, insertEmployeeSchema, insertActivitySchema } from "@shared/schema";
+import {
+  isAuthenticated,
+  loginThrottle,
+  recordFailedLogin,
+  clearLoginAttempts,
+} from "./auth";
+import { insertJobSchema, insertEmployeeSchema, type Employee } from "@shared/schema";
+
+/** The signed-in employee. Safe to assert past the isAuthenticated gate. */
+const actor = (req: Request) => req.user as Employee;
 
 export async function registerRoutes(httpServer: Server, app: Express) {
+  // ═══════════════════ AUTH (the only unauthenticated routes) ═══════════════════
+
+  app.post("/api/login", loginThrottle, (req, res, next) => {
+    passport.authenticate("local", (err: unknown, user: Employee | false, info?: { message?: string }) => {
+      if (err) return next(err);
+
+      if (!user) {
+        recordFailedLogin(req);
+        return res.status(401).json({ message: info?.message ?? "Incorrect username or password." });
+      }
+
+      // Re-issue the session id before establishing the login, so a session
+      // fixated by an attacker beforehand isn't the one that ends up authenticated.
+      req.session.regenerate((regenErr) => {
+        if (regenErr) return next(regenErr);
+
+        req.logIn(user, (loginErr) => {
+          if (loginErr) return next(loginErr);
+          clearLoginAttempts(req);
+          res.json(user);
+        });
+      });
+    })(req, res, next);
+  });
+
+  app.post("/api/logout", (req, res, next) => {
+    req.logout((err) => {
+      if (err) return next(err);
+      req.session.destroy((destroyErr) => {
+        if (destroyErr) return next(destroyErr);
+        res.clearCookie("jobtrack.sid");
+        res.status(204).end();
+      });
+    });
+  });
+
+  // Session check — how the client decides whether to show the app or the login
+  // page. 401 rather than 200-with-null so it matches every other route.
+  app.get("/api/me", (req, res) => {
+    if (!req.isAuthenticated?.()) return res.status(401).json({ message: "Not authenticated" });
+    res.json(req.user);
+  });
+
+  // ═══════════════════ THE GATE ═══════════════════
+  // Mounted on the /api prefix rather than repeated per route, so a route added
+  // later is protected by default instead of by whoever remembers. Everything
+  // below this line requires a session; everything above it is public.
+  app.use("/api", isAuthenticated);
+
   // ═══════════════════ EMPLOYEES ═══════════════════
   app.get("/api/employees", (_req, res) => {
     res.json(storage.getAllEmployees());
@@ -31,8 +93,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/employees/:id", (req, res) => {
-    const deleted = storage.deleteEmployee(parseInt(req.params.id, 10));
-    if (!deleted) return res.status(404).json({ message: "Employee not found" });
+    const id = parseInt(req.params.id, 10);
+    const emp = storage.getEmployee(id);
+    if (!emp) return res.status(404).json({ message: "Employee not found" });
+
+    // Employees and users are now the same table, so deleting the wrong row
+    // here destroys someone's login. Crew records stay deletable; accounts have
+    // to be removed with the seed script, deliberately.
+    if (emp.username) {
+      return res.status(409).json({
+        message: `${emp.name} has a login account and can't be deleted from the team page. Mark them inactive instead.`,
+      });
+    }
+
+    storage.deleteEmployee(id);
     res.status(204).end();
   });
 
@@ -54,15 +128,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.post("/api/jobs", (req, res) => {
     const result = insertJobSchema.safeParse(req.body);
     if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
-    const job = storage.createJob(result.data);
 
-    // Log activity
-    const emp = job.createdBy ? storage.getEmployee(job.createdBy) : null;
+    // createdBy comes from the session, never from the request body. The client
+    // used to send it, which meant anyone could file a job under anyone's name —
+    // and, because the who-am-I picker was React state that reset on refresh, it
+    // was usually just null, giving "Someone created job X".
+    const me = actor(req);
+    const job = storage.createJob({ ...result.data, createdBy: me.id });
+
     storage.logActivity({
       jobId: job.id,
-      employeeId: job.createdBy ?? null,
+      employeeId: me.id,
       action: "created",
-      details: `${emp?.name ?? "Someone"} created job ${job.jobNumber}`,
+      details: `${me.name} created job ${job.jobNumber}`,
       timestamp: new Date().toISOString(),
     });
 
@@ -80,16 +158,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const updatedJob = storage.updateJob(id, result.data);
     if (!updatedJob) return res.status(404).json({ message: "Job not found" });
 
-    // Log changes
-    const changedBy = req.body._changedBy ? storage.getEmployee(req.body._changedBy) : null;
-    const actor = changedBy?.name ?? "Someone";
+    // Was `req.body._changedBy` — any caller could attribute an edit to anyone.
+    const me = actor(req);
 
     if (result.data.status && result.data.status !== oldJob.status) {
       storage.logActivity({
         jobId: id,
-        employeeId: changedBy?.id ?? null,
+        employeeId: me.id,
         action: "status_changed",
-        details: `${actor} changed status from ${oldJob.status} to ${result.data.status}`,
+        details: `${me.name} changed status from ${oldJob.status} to ${result.data.status}`,
         timestamp: new Date().toISOString(),
       });
     }
@@ -97,21 +174,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const assignee = result.data.assignedTo ? storage.getEmployee(result.data.assignedTo) : null;
       storage.logActivity({
         jobId: id,
-        employeeId: changedBy?.id ?? null,
+        employeeId: me.id,
         action: "assigned",
-        details: assignee ? `${actor} assigned job to ${assignee.name}` : `${actor} unassigned job`,
+        details: assignee ? `${me.name} assigned job to ${assignee.name}` : `${me.name} unassigned job`,
         timestamp: new Date().toISOString(),
       });
     }
     // General update log for other changes
-    const skipKeys = ["status", "assignedTo", "_changedBy"];
+    const skipKeys = ["status", "assignedTo"];
     const otherChanges = Object.keys(result.data).filter((k) => !skipKeys.includes(k));
     if (otherChanges.length > 0) {
       storage.logActivity({
         jobId: id,
-        employeeId: changedBy?.id ?? null,
+        employeeId: me.id,
         action: "updated",
-        details: `${actor} updated ${otherChanges.join(", ")}`,
+        details: `${me.name} updated ${otherChanges.join(", ")}`,
         timestamp: new Date().toISOString(),
       });
     }
@@ -120,19 +197,23 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/jobs/:id", (req, res) => {
-    const job = storage.getJob(parseInt(req.params.id, 10));
-    const deleted = storage.deleteJob(parseInt(req.params.id, 10));
-    if (!deleted) return res.status(404).json({ message: "Job not found" });
+    const id = parseInt(req.params.id, 10);
+    const job = storage.getJob(id);
+    if (!job) return res.status(404).json({ message: "Job not found" });
 
-    if (job) {
-      storage.logActivity({
-        jobId: job.id,
-        employeeId: null,
-        action: "deleted",
-        details: `Job ${job.jobNumber} (${job.jobName}) was deleted`,
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const me = actor(req);
+    storage.deleteJob(id);
+
+    // Logged before the row is gone so the trail keeps the job number and name.
+    // Note there is deliberately no ON DELETE CASCADE on activity_log: cascading
+    // would delete exactly the history this record exists to preserve.
+    storage.logActivity({
+      jobId: job.id,
+      employeeId: me.id,
+      action: "deleted",
+      details: `${me.name} deleted job ${job.jobNumber} (${job.jobName})`,
+      timestamp: new Date().toISOString(),
+    });
 
     res.status(204).end();
   });
@@ -141,6 +222,26 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.get("/api/activity", (req, res) => {
     const jobId = req.query.jobId ? parseInt(req.query.jobId as string, 10) : undefined;
     res.json(storage.getActivities(jobId));
+  });
+
+  // ═══════════════════ BACKUP ═══════════════════
+  // Railway volumes have no file browser and no download, so without this the
+  // only copy of the database is unreachable except from inside the container.
+  // Hitting this route in a browser downloads a consistent snapshot.
+  app.get("/api/admin/backup", (req, res, next) => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
+    const tmp = path.join(os.tmpdir(), `jobtrack-backup-${stamp}.db`);
+
+    try {
+      storage.backupTo(tmp);
+    } catch (err) {
+      return next(err);
+    }
+
+    res.download(tmp, `jobtrack-${stamp}.db`, (err) => {
+      fs.unlink(tmp, () => {});
+      if (err && !res.headersSent) next(err);
+    });
   });
 
   return httpServer;

@@ -9,11 +9,9 @@ RUN npm install
 # Copy all source code
 COPY . .
 
-# Build client (Vite)
-RUN npx vite build
-
-# Build server (esbuild)
-RUN npx esbuild server/index.ts --platform=node --bundle --format=cjs --outfile=dist/index.cjs --define:process.env.NODE_ENV=\"production\" --minify --external:better-sqlite3
+# Build client (Vite) + server (esbuild). Defined once, in package.json, so a
+# local `npm run build` produces exactly what the deployed image runs.
+RUN npm run build
 
 # Create data directory for SQLite persistence
 RUN mkdir -p /data

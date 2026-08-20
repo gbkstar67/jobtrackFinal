@@ -1,20 +1,13 @@
 import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useCurrentUser } from "@/App";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import type { Employee } from "@shared/schema";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { Button } from "@/components/ui/button";
 import {
   LayoutDashboardIcon,
   UsersIcon,
   ActivityIcon,
-  ChevronDownIcon,
-  UserCircleIcon,
+  LogOutIcon,
 } from "lucide-react";
 
 const AVATAR_COLORS = [
@@ -28,13 +21,14 @@ function getInitials(name: string) {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { currentUser, setCurrentUser } = useCurrentUser();
+  const currentUser = useCurrentUser();
 
-  const { data: employees = [] } = useQuery<Employee[]>({
-    queryKey: ["/api/employees"],
+  const logout = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/logout"),
+    // clear() rather than invalidate(): nothing cached should outlive the
+    // session, and the next user on this browser shouldn't see the last one's data.
+    onSuccess: () => queryClient.clear(),
   });
-
-  const activeEmployees = employees.filter((e) => e.active);
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboardIcon },
@@ -87,61 +81,33 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </nav>
           </div>
 
-          {/* Who Am I picker */}
+          {/* Signed-in user + sign out */}
           <div className="flex items-center gap-3">
-            {activeEmployees.length === 0 ? (
-              <Link href="/team">
-                <span className="text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer">
-                  + Add team members
+            {currentUser && (
+              <div data-testid="text-current-user" className="flex items-center gap-2">
+                <span className={`w-7 h-7 rounded-full text-[11px] font-bold flex items-center justify-center text-white ${currentUser.color}`}>
+                  {getInitials(currentUser.name)}
                 </span>
-              </Link>
-            ) : (
-              <Select
-                value={currentUser ? String(currentUser.id) : "none"}
-                onValueChange={(val) => {
-                  if (val === "none") {
-                    setCurrentUser(null);
-                  } else {
-                    const emp = activeEmployees.find((e) => e.id === parseInt(val, 10));
-                    if (emp) setCurrentUser(emp);
-                  }
-                }}
-              >
-                <SelectTrigger
-                  data-testid="select-current-user"
-                  className="w-auto min-w-[160px] bg-secondary border-border text-foreground text-sm h-9 gap-2"
-                >
-                  {currentUser ? (
-                    <div className="flex items-center gap-2">
-                      <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white ${currentUser.color}`}>
-                        {getInitials(currentUser.name)}
-                      </span>
-                      <span className="truncate max-w-[120px]">{currentUser.name}</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <UserCircleIcon className="w-4 h-4" />
-                      <span>Select yourself</span>
-                    </div>
+                <div className="hidden sm:block leading-tight">
+                  <p className="text-sm font-medium text-foreground">{currentUser.name}</p>
+                  {currentUser.role && (
+                    <p className="text-xs text-muted-foreground">{currentUser.role}</p>
                   )}
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border text-foreground">
-                  <SelectItem value="none">
-                    <span className="text-muted-foreground">No one selected</span>
-                  </SelectItem>
-                  {activeEmployees.map((emp) => (
-                    <SelectItem key={emp.id} value={String(emp.id)}>
-                      <div className="flex items-center gap-2">
-                        <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white ${emp.color}`}>
-                          {getInitials(emp.name)}
-                        </span>
-                        {emp.name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                </div>
+              </div>
             )}
+            <Button
+              data-testid="button-logout"
+              variant="ghost"
+              size="sm"
+              onClick={() => logout.mutate()}
+              disabled={logout.isPending}
+              title="Sign out"
+              className="text-muted-foreground hover:text-foreground gap-1.5"
+            >
+              <LogOutIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </Button>
           </div>
         </div>
       </header>

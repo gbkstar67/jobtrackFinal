@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { setupAuth } from "./auth";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
@@ -48,7 +49,8 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      // Auth responses carry the signed-in employee; keep them out of the logs.
+      if (capturedJsonResponse && !path.startsWith("/api/login") && path !== "/api/me") {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 
@@ -60,6 +62,10 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Sessions and Passport must be in place before any route is registered,
+  // since the /api gate inside registerRoutes depends on req.isAuthenticated().
+  setupAuth(app);
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
