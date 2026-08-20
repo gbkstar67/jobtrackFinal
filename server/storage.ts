@@ -112,21 +112,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   getNextJobNumber(): string {
-    const year = new Date().getFullYear();
-    const prefix = `JOB-${year}-`;
-
-    // Computed in SQL rather than by loading every job into memory and reducing
-    // over it. substr() is 1-indexed in SQLite, hence the + 1.
+    // Plain sequential numbers matching the shop's existing paper job log:
+    // 24163, 25427, 26485, ... The leading two digits are the year the number
+    // was issued, but the sequence simply carries on rather than resetting, so
+    // the rule is just "one more than the highest number on the board".
+    //
+    // Non-numeric job numbers CAST to 0 in SQLite, so any stragglers in the old
+    // JOB-2026-0001 format are ignored rather than breaking the count.
     const row = db
-      .select({
-        maxNum: sql<number | null>`MAX(CAST(substr(${jobs.jobNumber}, ${prefix.length + 1}) AS INTEGER))`,
-      })
+      .select({ maxNum: sql<number | null>`MAX(CAST(${jobs.jobNumber} AS INTEGER))` })
       .from(jobs)
-      .where(sql`${jobs.jobNumber} LIKE ${prefix + "%"}`)
       .get();
 
-    const nextNum = ((row?.maxNum ?? 0) + 1).toString().padStart(4, "0");
-    return `${prefix}${nextNum}`;
+    // Seeded so an empty board starts where the paper log left off rather than at 1.
+    const FIRST_JOB_NUMBER = 26486;
+    const max = row?.maxNum ?? 0;
+    return String(max > 0 ? max + 1 : FIRST_JOB_NUMBER);
   }
 
   // ── Activity ──
