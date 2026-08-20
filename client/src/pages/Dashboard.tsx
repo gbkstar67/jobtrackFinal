@@ -4,6 +4,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import AppShell from "@/components/AppShell";
+import Avatar from "@/components/Avatar";
 import { getInitials } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -146,9 +147,7 @@ export default function Dashboard() {
               {activeEmployees.map((emp) => (
                 <SelectItem key={emp.id} value={String(emp.id)}>
                   <div className="flex items-center gap-2">
-                    <span className={`w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-white ${emp.color}`}>
-                      {getInitials(emp.name)}
-                    </span>
+                    <Avatar employee={emp} className="w-5 h-5" textClassName="text-[8px]" />
                     {emp.name}
                   </div>
                 </SelectItem>
@@ -245,9 +244,7 @@ export default function Dashboard() {
                             {activeEmployees.map((emp) => (
                               <SelectItem key={emp.id} value={String(emp.id)}>
                                 <div className="flex items-center gap-2">
-                                  <span className={`w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-white ${emp.color}`}>
-                                    {getInitials(emp.name)}
-                                  </span>
+                                  <Avatar employee={emp} className="w-5 h-5" textClassName="text-[8px]" />
                                   {emp.name}
                                 </div>
                               </SelectItem>
@@ -375,9 +372,7 @@ export default function Dashboard() {
                       </div>
                       <div>
                         {assignee ? (
-                          <span className={`w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center text-white ${assignee.color}`} title={assignee.name}>
-                            {getInitials(assignee.name)}
-                          </span>
+                          <Avatar employee={assignee} className="w-7 h-7" textClassName="text-[10px]" />
                         ) : <span className="text-xs text-muted-foreground/40">—</span>}
                       </div>
                       <ChevronRightIcon className="w-4 h-4 text-muted-foreground" />
@@ -391,9 +386,7 @@ export default function Dashboard() {
                           <span className="label-caps">{job.jobName}</span>
                         </div>
                         {assignee && (
-                          <span className={`w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center text-white flex-shrink-0 ${assignee.color}`} title={assignee.name}>
-                            {getInitials(assignee.name)}
-                          </span>
+                          <Avatar employee={assignee} className="w-7 h-7" textClassName="text-[10px]" />
                         )}
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">

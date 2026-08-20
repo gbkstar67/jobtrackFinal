@@ -116,12 +116,20 @@ export function setupAuth(app: Express) {
       store: createSessionStore(sqlite),
       resave: false,
       saveUninitialized: false,
-      rolling: true, // slide the 30-day window forward on activity
+      // A year, slid forward on every request. This is a four-person internal
+      // tool used from the same phones every day; being asked to sign in again
+      // is friction with no security payoff, because the real gate is the lock
+      // screen on the device. Sign out is always available in the header.
+      //
+      // The cookie is httpOnly and set by the server, which also keeps it out
+      // of reach of iOS's 7-day cap on script-writable storage — a JS-set
+      // token would be evicted after a week of not opening the app.
+      rolling: true,
       cookie: {
         httpOnly: true,
         secure: isProduction,
         sameSite: "lax",
-        maxAge: 30 * 24 * 60 * 60_000,
+        maxAge: 365 * 24 * 60 * 60_000,
       },
     }),
   );

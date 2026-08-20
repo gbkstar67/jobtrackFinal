@@ -47,9 +47,17 @@ export const employeePublicColumns = {
 } as const;
 
 export type InsertEmployee = z.infer<typeof insertEmployeeSchema>;
+
+/** Largest avatar the server will accept, after the browser has resized it. */
+export const MAX_AVATAR_BYTES = 400_000;
+export const AVATAR_PIXELS = 256;
 export type EmployeeRow = typeof employees.$inferSelect;
-/** An employee as the client ever sees one — never includes passwordHash. */
-export type Employee = Omit<EmployeeRow, "passwordHash">;
+/**
+ * An employee as the client ever sees one — never includes passwordHash.
+ * hasAvatar is computed, not stored: it tells the UI whether to request the
+ * picture or fall back to initials.
+ */
+export type Employee = Omit<EmployeeRow, "passwordHash"> & { hasAvatar?: boolean };
 
 // ── Jobs ──
 export const jobs = sqliteTable("jobs", {

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import AppShell from "@/components/AppShell";
+import Avatar from "@/components/Avatar";
 import { getInitials } from "@/components/AppShell";
 import type { Activity, Employee, Job } from "@shared/schema";
 import {
@@ -118,12 +119,7 @@ export default function ActivityPage() {
                     </div>
                   </div>
                   {emp && (
-                    <span
-                      className={`w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center text-white flex-shrink-0 ${emp.color}`}
-                      title={emp.name}
-                    >
-                      {getInitials(emp.name)}
-                    </span>
+                    <Avatar employee={emp} className="w-7 h-7" textClassName="text-[10px]" />
                   )}
                 </div>
               );

@@ -154,6 +154,26 @@ const MIGRATIONS: Array<(d: Database.Database) => void> = [
     addColumn(d, "jobs", "bid_by", "TEXT");
     addColumn(d, "jobs", "billing_type", "TEXT");
   },
+
+  // ── 5: profile pictures ──
+  // Held in their own table rather than as a column on employees: a BLOB on
+  // employees would be dragged into every "list the team" query, and those run
+  // on nearly every page. Here the bytes are only read when an avatar is
+  // actually requested.
+  //
+  // In the database rather than on the volume so a picture can't be orphaned
+  // by a failed write, and so VACUUM INTO backups include it. Images are
+  // resized to 256px in the browser before upload, so rows stay small.
+  (d) => {
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS employee_avatars (
+        employee_id INTEGER PRIMARY KEY,
+        mime TEXT NOT NULL,
+        bytes BLOB NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  },
 ];
 
 function runMigrations(d: Database.Database) {

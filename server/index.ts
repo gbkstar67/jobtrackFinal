@@ -15,6 +15,10 @@ declare module "http" {
 
 app.use(
   express.json({
+    // Profile pictures arrive as base64 data URLs, which inflate the bytes by
+    // about a third. The default 100kb limit would reject them before the
+    // route's own size check ran. The route still enforces MAX_AVATAR_BYTES.
+    limit: "1mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },

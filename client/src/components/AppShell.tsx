@@ -10,6 +10,7 @@ import {
   LogOutIcon,
 } from "lucide-react";
 import { HLTBadge, FadeBar, Wordmark, CompanyLine } from "@/components/Brand";
+import Avatar from "@/components/Avatar";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-emerald-500", "bg-blue-500", "bg-purple-500",
@@ -83,9 +84,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
             {currentUser && (
               <div data-testid="text-current-user" className="flex items-center gap-2">
-                <span className={`w-7 h-7 rounded-full text-[11px] font-bold flex items-center justify-center text-white ${currentUser.color}`}>
-                  {getInitials(currentUser.name)}
-                </span>
+                <Avatar employee={currentUser} className="w-8 h-8" textClassName="text-[11px]" />
                 <div className="hidden sm:block leading-tight">
                   <p className="text-sm font-medium text-foreground">{currentUser.name}</p>
                   {currentUser.role && (

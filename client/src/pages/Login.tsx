@@ -7,8 +7,17 @@ import { Label } from "@/components/ui/label";
 import { LoaderCircleIcon } from "lucide-react";
 import { HLTBadge, FadeBar, Wordmark, CompanyLine } from "@/components/Brand";
 
+/** Whose phone this is. Not a credential — just saves retyping it. */
+const LAST_USER_KEY = "jobtrack.lastUsername";
+
 export default function Login() {
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(() => {
+    try {
+      return localStorage.getItem(LAST_USER_KEY) ?? "";
+    } catch {
+      return ""; // private browsing, or storage disabled
+    }
+  });
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -18,6 +27,11 @@ export default function Login() {
       return res.json();
     },
     onSuccess: (user) => {
+      try {
+        localStorage.setItem(LAST_USER_KEY, username);
+      } catch {
+        /* storage unavailable — the login still worked */
+      }
       // Seed the identity straight from the response, then let everything else
       // refetch now that requests will actually be authorised.
       queryClient.setQueryData(ME_KEY, user);
@@ -64,7 +78,7 @@ export default function Login() {
               id="username"
               data-testid="input-username"
               autoComplete="username"
-              autoFocus
+              autoFocus={username === ""}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="bg-background border-border text-foreground"
@@ -78,6 +92,7 @@ export default function Login() {
               data-testid="input-password"
               type="password"
               autoComplete="current-password"
+              autoFocus={username !== ""}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="bg-background border-border text-foreground"

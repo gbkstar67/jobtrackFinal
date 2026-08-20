@@ -11,7 +11,9 @@ import {
   recordFailedLogin,
   clearLoginAttempts,
 } from "./auth";
-import { insertJobSchema, insertEmployeeSchema, type Employee } from "@shared/schema";
+import {
+  insertJobSchema, insertEmployeeSchema, MAX_AVATAR_BYTES, type Employee,
+} from "@shared/schema";
 
 /** The signed-in employee. Safe to assert past the isAuthenticated gate. */
 const actor = (req: Request) => req.user as Employee;
@@ -107,6 +109,77 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
 
     storage.deleteEmployee(id);
+    res.status(204).end();
+  });
+
+  // ═══════════════════ AVATARS ═══════════════════
+  //
+  // The browser resizes and re-encodes the picture to a small square before it
+  // gets here, so the upload is a JSON data URL rather than a multipart form.
+  // That avoids a file-upload dependency and caps the size at the source — but
+  // the checks below still assume the client is lying, because it might be.
+
+  const AVATAR_MIMES: Record<string, string> = {
+    "image/jpeg": "jpeg",
+    "image/png": "png",
+    "image/webp": "webp",
+  };
+
+  /** Confirm the bytes really are the image type they claim to be. */
+  function sniff(bytes: Buffer): string | null {
+    if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+    if (bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+      return "image/png";
+    if (bytes.length > 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+        bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+    return null;
+  }
+
+  app.get("/api/employees/:id/avatar", (req, res) => {
+    const avatar = storage.getAvatar(parseInt(req.params.id, 10));
+    if (!avatar) return res.status(404).json({ message: "No profile picture" });
+
+    // Keyed on the upload time so a new picture busts the cache immediately
+    // while an unchanged one is served from it.
+    const etag = `"${Buffer.from(avatar.updatedAt).toString("base64url")}"`;
+    if (req.headers["if-none-match"] === etag) return res.status(304).end();
+
+    res.setHeader("Content-Type", avatar.mime);
+    res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    res.setHeader("ETag", etag);
+    res.send(avatar.bytes);
+  });
+
+  app.put("/api/employees/:id/avatar", (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!storage.getEmployee(id)) return res.status(404).json({ message: "Employee not found" });
+
+    const dataUrl = typeof req.body?.dataUrl === "string" ? req.body.dataUrl : "";
+    const match = dataUrl.match(/^data:([a-z/+-]+);base64,(.+)$/i);
+    if (!match) return res.status(400).json({ message: "Expected a base64 image data URL" });
+
+    const [, claimedMime, b64] = match;
+    if (!AVATAR_MIMES[claimedMime]) {
+      return res.status(415).json({ message: "Use a JPEG, PNG or WebP image" });
+    }
+
+    const bytes = Buffer.from(b64, "base64");
+    if (bytes.length === 0) return res.status(400).json({ message: "Image was empty" });
+    if (bytes.length > MAX_AVATAR_BYTES) {
+      return res.status(413).json({ message: "That image is too large" });
+    }
+
+    // Trust the bytes, not the label.
+    const actualMime = sniff(bytes);
+    if (!actualMime) return res.status(415).json({ message: "That file isn't a valid image" });
+
+    storage.setAvatar(id, actualMime, bytes);
+    res.status(204).end();
+  });
+
+  app.delete("/api/employees/:id/avatar", (req, res) => {
+    const removed = storage.deleteAvatar(parseInt(req.params.id, 10));
+    if (!removed) return res.status(404).json({ message: "No profile picture" });
     res.status(204).end();
   });
 

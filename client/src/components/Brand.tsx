@@ -14,18 +14,10 @@ export function HLTBadge({ className = "w-9 h-9" }: { className?: string }) {
       className={className}
       xmlns="http://www.w3.org/2000/svg"
     >
-      <circle cx="24" cy="24" r="23" fill="hsl(var(--navy))" />
-      {/* The lighter blue sweep that wraps the monogram on the letterhead */}
-      <path
-        d="M24 4a20 20 0 0 1 0 40"
-        fill="none"
-        stroke="hsl(var(--primary))"
-        strokeWidth="5"
-        strokeLinecap="round"
-      />
+      <circle cx="24" cy="24" r="23" fill="hsl(var(--primary))" />
       <text
         x="24"
-        y="24"
+        y="24.5"
         textAnchor="middle"
         dominantBaseline="central"
         fill="#ffffff"

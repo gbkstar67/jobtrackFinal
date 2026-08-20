@@ -12,6 +12,9 @@ export interface IStorage {
   getAllEmployees(): Employee[];
   getEmployee(id: number): Employee | undefined;
   getEmployeeByUsername(username: string): EmployeeRow | undefined;
+  getAvatar(id: number): { mime: string; bytes: Buffer; updatedAt: string } | undefined;
+  setAvatar(id: number, mime: string, bytes: Buffer): void;
+  deleteAvatar(id: number): boolean;
   createEmployee(emp: InsertEmployee): Employee;
   updateEmployee(id: number, updates: Partial<InsertEmployee>): Employee | undefined;
   deleteEmployee(id: number): boolean;
@@ -35,11 +38,48 @@ export class DatabaseStorage implements IStorage {
   // select().from(employees) would now include password_hash and hand it to any
   // logged-in user via GET /api/employees.
   getAllEmployees(): Employee[] {
-    return db.select(employeePublicColumns).from(employees).orderBy(employees.name).all();
+    const rows = db.select(employeePublicColumns).from(employees).orderBy(employees.name).all();
+    const withAvatars = this.employeeIdsWithAvatars();
+    return rows.map((e) => ({ ...e, hasAvatar: withAvatars.has(e.id) }));
   }
 
   getEmployee(id: number): Employee | undefined {
-    return db.select(employeePublicColumns).from(employees).where(eq(employees.id, id)).get();
+    const row = db.select(employeePublicColumns).from(employees).where(eq(employees.id, id)).get();
+    if (!row) return undefined;
+    return { ...row, hasAvatar: this.employeeIdsWithAvatars().has(row.id) };
+  }
+
+  // ── Avatars ──
+  // Deliberately raw statements: the bytes are a BLOB and are only ever read
+  // by getAvatar, so they never ride along on a normal employee query.
+
+  private employeeIdsWithAvatars(): Set<number> {
+    const rows = sqlite
+      .prepare("SELECT employee_id AS id FROM employee_avatars")
+      .all() as Array<{ id: number }>;
+    return new Set(rows.map((r) => r.id));
+  }
+
+  getAvatar(employeeId: number): { mime: string; bytes: Buffer; updatedAt: string } | undefined {
+    const row = sqlite
+      .prepare("SELECT mime, bytes, updated_at AS updatedAt FROM employee_avatars WHERE employee_id = ?")
+      .get(employeeId) as { mime: string; bytes: Buffer; updatedAt: string } | undefined;
+    return row;
+  }
+
+  setAvatar(employeeId: number, mime: string, bytes: Buffer): void {
+    sqlite
+      .prepare(
+        `INSERT INTO employee_avatars (employee_id, mime, bytes, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(employee_id) DO UPDATE SET
+           mime = excluded.mime, bytes = excluded.bytes, updated_at = excluded.updated_at`,
+      )
+      .run(employeeId, mime, bytes, new Date().toISOString());
+  }
+
+  deleteAvatar(employeeId: number): boolean {
+    return sqlite.prepare("DELETE FROM employee_avatars WHERE employee_id = ?").run(employeeId).changes > 0;
   }
 
   /**
@@ -71,6 +111,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   deleteEmployee(id: number): boolean {
+    // Take the picture with them; nothing else references the row.
+    this.deleteAvatar(id);
     const result = db.delete(employees).where(eq(employees.id, id)).run();
     return result.changes > 0;
   }

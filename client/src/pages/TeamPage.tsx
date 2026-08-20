@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import AppShell from "@/components/AppShell";
+import AvatarUpload from "@/components/AvatarUpload";
 import { AVATAR_COLORS, getInitials } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -186,18 +187,14 @@ export default function TeamPage() {
                 className={`bg-card border border-border rounded-lg p-5 relative ${!emp.active ? "opacity-50" : ""}`}
               >
                 <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`w-10 h-10 rounded-full text-sm font-bold flex items-center justify-center text-white ${emp.color}`}
-                    >
-                      {getInitials(emp.name)}
-                    </span>
-                    <div>
+                  <div className="min-w-0">
+                    <div className="mb-2">
                       <p className="text-sm font-semibold text-foreground">{emp.name}</p>
                       {emp.role && (
-                        <p className="text-xs text-muted-foreground">{emp.role}</p>
+                        <p className="label-caps">{emp.role}</p>
                       )}
                     </div>
+                    <AvatarUpload employee={emp} />
                   </div>
                   <div className="flex items-center gap-1">
                     <button
