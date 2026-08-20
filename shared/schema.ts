@@ -63,15 +63,44 @@ export const jobs = sqliteTable("jobs", {
   assignedTo: integer("assigned_to"),        // employee id
   createdBy: integer("created_by"),          // employee id
   startDate: text("start_date"),
+
+  // Who bid the job: "HT" (Henry Thomas) or "DV" (Derek Victor). Stored as the
+  // two-letter code the shop already writes on the paper job log.
+  bidBy: text("bid_by"),
+  // How the job bills: "CO" (contract) or "TM" (time & material).
+  billingType: text("billing_type"),
+
   notes: text("notes"),
   createdAt: text("created_at").notNull(),
 });
 
-export const insertJobSchema = createInsertSchema(jobs).omit({
-  id: true,
-  jobNumber: true,
-  createdAt: true,
-});
+// The two codes are constrained to their allowed values here rather than left
+// as free text, so a typo can't reach the database through the API.
+export const insertJobSchema = createInsertSchema(jobs)
+  .omit({
+    id: true,
+    jobNumber: true,
+    createdAt: true,
+  })
+  .extend({
+    bidBy: z.enum(["HT", "DV"]).nullable().optional(),
+    billingType: z.enum(["CO", "TM"]).nullable().optional(),
+  });
+
+/** Bidder codes, as written on the paper job log. */
+export const BID_BY = {
+  HT: "Henry Thomas",
+  DV: "Derek Victor",
+} as const;
+
+/** Billing types, as written on the paper job log. */
+export const BILLING_TYPE = {
+  CO: "Contract",
+  TM: "Time & Material",
+} as const;
+
+export type BidBy = keyof typeof BID_BY;
+export type BillingType = keyof typeof BILLING_TYPE;
 
 export type InsertJob = z.infer<typeof insertJobSchema>;
 export type Job = typeof jobs.$inferSelect;

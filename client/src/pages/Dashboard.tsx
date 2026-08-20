@@ -32,7 +32,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertJobSchema, type Job, type InsertJob, type Employee } from "@shared/schema";
+import {
+  insertJobSchema, BID_BY, BILLING_TYPE,
+  type Job, type InsertJob, type Employee, type BidBy, type BillingType,
+} from "@shared/schema";
+import CodePicker, { CodeBadge } from "@/components/CodePicker";
 import { z } from "zod";
 import {
   PlusIcon,
@@ -72,6 +76,8 @@ export default function Dashboard() {
       clientAddress: "",
       assignedTo: null,
       startDate: "",
+      bidBy: null,
+      billingType: null,
       notes: "",
     },
   });
@@ -252,6 +258,38 @@ export default function Dashboard() {
                   )}
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FormField control={form.control} name="bidBy" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium text-foreground">Who bid this job?</FormLabel>
+                      <CodePicker<BidBy>
+                        testId="picker-bid-by"
+                        value={field.value as BidBy | null}
+                        onChange={field.onChange}
+                        options={[
+                          { code: "HT", label: BID_BY.HT },
+                          { code: "DV", label: BID_BY.DV },
+                        ]}
+                      />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="billingType" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium text-foreground">Contract or Time &amp; Material?</FormLabel>
+                      <CodePicker<BillingType>
+                        testId="picker-billing-type"
+                        value={field.value as BillingType | null}
+                        onChange={field.onChange}
+                        options={[
+                          { code: "CO", label: BILLING_TYPE.CO },
+                          { code: "TM", label: BILLING_TYPE.TM },
+                        ]}
+                      />
+                    </FormItem>
+                  )} />
+                </div>
+
                 <FormField control={form.control} name="notes" render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-sm font-medium text-foreground">Notes</FormLabel>
@@ -299,10 +337,11 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Desktop header */}
-            <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_100px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/30">
+            <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_90px_100px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/30">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Job #</span>
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Job Name</span>
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client</span>
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Bid / Type</span>
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assigned</span>
               <span className="sr-only">Go</span>
             </div>
@@ -313,12 +352,20 @@ export default function Dashboard() {
                 return (
                   <button key={job.id} data-testid={`row-job-${job.id}`} onClick={() => navigate(`/job/${job.id}`)} className="job-row w-full text-left">
                     {/* Desktop */}
-                    <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_100px_28px] gap-3 px-4 py-3.5 items-center">
+                    <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_90px_100px_28px] gap-3 px-4 py-3.5 items-center">
                       <span data-testid={`text-job-number-${job.id}`} className="font-mono text-sm font-semibold text-primary">{job.jobNumber}</span>
                       <span className="text-sm font-medium text-foreground truncate">{job.jobName}</span>
                       <div className="flex items-center gap-2 min-w-0">
                         <UserIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                         <span className="text-sm text-muted-foreground truncate">{job.clientName}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {job.bidBy ? (
+                          <CodeBadge code={job.bidBy} title={BID_BY[job.bidBy as BidBy] ?? undefined} />
+                        ) : <span className="text-xs text-muted-foreground/40">—</span>}
+                        {job.billingType ? (
+                          <CodeBadge code={job.billingType} title={BILLING_TYPE[job.billingType as BillingType] ?? undefined} />
+                        ) : null}
                       </div>
                       <div>
                         {assignee ? (
@@ -343,9 +390,13 @@ export default function Dashboard() {
                           </span>
                         )}
                       </div>
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <UserIcon className="w-3 h-3" />{job.clientName}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <UserIcon className="w-3 h-3" />{job.clientName}
+                        </span>
+                        {job.bidBy && <CodeBadge code={job.bidBy} title={BID_BY[job.bidBy as BidBy] ?? undefined} />}
+                        {job.billingType && <CodeBadge code={job.billingType} title={BILLING_TYPE[job.billingType as BillingType] ?? undefined} />}
+                      </div>
                     </div>
                   </button>
                 );

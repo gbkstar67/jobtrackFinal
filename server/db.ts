@@ -143,6 +143,17 @@ const MIGRATIONS: Array<(d: Database.Database) => void> = [
       }
     }
   },
+
+  // ── 4: who bid it, and how it bills ──
+  // Two codes the shop already keeps on the paper job log: bid_by is HT (Henry
+  // Thomas) or DV (Derek Victor); billing_type is CO (contract) or TM (time &
+  // material). Nullable — jobs predating this, and the overhead account, have
+  // neither. Values are constrained in insertJobSchema rather than by a CHECK
+  // so the codes can be extended without a table rebuild.
+  (d) => {
+    addColumn(d, "jobs", "bid_by", "TEXT");
+    addColumn(d, "jobs", "billing_type", "TEXT");
+  },
 ];
 
 function runMigrations(d: Database.Database) {

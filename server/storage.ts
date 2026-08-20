@@ -77,7 +77,15 @@ export class DatabaseStorage implements IStorage {
 
   // ── Jobs ──
   getAllJobs(): Job[] {
-    return db.select().from(jobs).orderBy(desc(jobs.id)).all();
+    // Highest job number first. The numbers are issued sequentially, so this is
+    // newest-first, and it keeps the board stable regardless of the order rows
+    // happened to be inserted — the paper-log import and the 09400 overhead
+    // account would otherwise land wherever their row id fell.
+    return db
+      .select()
+      .from(jobs)
+      .orderBy(sql`CAST(${jobs.jobNumber} AS INTEGER) DESC`)
+      .all();
   }
 
   getJob(id: number): Job | undefined {

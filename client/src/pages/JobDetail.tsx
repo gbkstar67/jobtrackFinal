@@ -29,7 +29,8 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertJobSchema, type Job, type Employee, type Activity } from "@shared/schema";
+import { insertJobSchema, type Job, type Employee, type Activity, BID_BY, BILLING_TYPE, type BidBy, type BillingType } from "@shared/schema";
+import CodePicker from "@/components/CodePicker";
 import { z } from "zod";
 import {
   ArrowLeftIcon,
@@ -119,6 +120,8 @@ export default function JobDetail() {
           assignedTo: job.assignedTo ?? null,
           createdBy: job.createdBy ?? null,
           startDate: job.startDate ?? "",
+          bidBy: job.bidBy as any,
+          billingType: job.billingType as any,
           notes: job.notes ?? "",
         }
       : undefined,
@@ -327,7 +330,7 @@ export default function JobDetail() {
           {/* Schedule */}
           <div className="bg-card border border-border rounded-lg p-5 space-y-4">
             <h2 className="font-display font-bold text-sm text-muted-foreground uppercase tracking-wide flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4" /> Schedule
+              <CalendarIcon className="w-4 h-4" /> Job Details
             </h2>
             {isEditing ? (
               <Form {...form}>
@@ -340,6 +343,36 @@ export default function JobDetail() {
                       </FormControl>
                     </FormItem>
                   )} />
+
+                  <FormField control={form.control} name="bidBy" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-muted-foreground">Who bid this job?</FormLabel>
+                      <CodePicker<BidBy>
+                        testId="picker-edit-bid-by"
+                        value={field.value as BidBy | null}
+                        onChange={field.onChange}
+                        options={[
+                          { code: "HT", label: BID_BY.HT },
+                          { code: "DV", label: BID_BY.DV },
+                        ]}
+                      />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="billingType" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-muted-foreground">Contract or Time &amp; Material?</FormLabel>
+                      <CodePicker<BillingType>
+                        testId="picker-edit-billing-type"
+                        value={field.value as BillingType | null}
+                        onChange={field.onChange}
+                        options={[
+                          { code: "CO", label: BILLING_TYPE.CO },
+                          { code: "TM", label: BILLING_TYPE.TM },
+                        ]}
+                      />
+                    </FormItem>
+                  )} />
                 </div>
               </Form>
             ) : (
@@ -347,6 +380,20 @@ export default function JobDetail() {
                 <div><p className="text-xs text-muted-foreground mb-0.5">Start Date</p>
                   <p data-testid="text-start-date" className="text-sm font-medium text-foreground">
                     {job.startDate ? new Date(job.startDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" }) : <span className="text-muted-foreground/40">—</span>}
+                  </p>
+                </div>
+                <div><p className="text-xs text-muted-foreground mb-0.5">Bid By</p>
+                  <p data-testid="text-bid-by" className="text-sm font-medium text-foreground">
+                    {job.bidBy
+                      ? <><span className="font-mono font-bold text-primary">{job.bidBy}</span> — {BID_BY[job.bidBy as BidBy] ?? "Unknown"}</>
+                      : <span className="text-muted-foreground/40">—</span>}
+                  </p>
+                </div>
+                <div><p className="text-xs text-muted-foreground mb-0.5">Billing</p>
+                  <p data-testid="text-billing-type" className="text-sm font-medium text-foreground">
+                    {job.billingType
+                      ? <><span className="font-mono font-bold text-primary">{job.billingType}</span> — {BILLING_TYPE[job.billingType as BillingType] ?? "Unknown"}</>
+                      : <span className="text-muted-foreground/40">—</span>}
                   </p>
                 </div>
               </div>
