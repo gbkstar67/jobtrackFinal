@@ -7,8 +7,9 @@
  * the sheet rather than generated, so the board matches the paper log exactly.
  * After this runs, getNextJobNumber() continues from the highest number here.
  *
- * Job names and customer names are transcribed exactly as printed, including
- * the sheet's own spellings. Fix them in the UI if you want them cleaned up.
+ * Job and customer names follow the sheet, with five spellings corrected at
+ * Grant's direction (BEHAVIORAL, BLAIRSVILLE, HEMATOLOGY, MOTORIZED,
+ * MONROEVILLE). 26280 "ASTIQUE" is correct as printed and left alone.
  *
  * Re-running is safe: a job number already on the board is skipped, not duplicated.
  *
@@ -22,6 +23,9 @@ import { sqlite } from "../server/db";
 
 /** [job number, job name, customer] — straight off the sheet, in sheet order. */
 const JOBS: Array<[string, string, string]> = [
+  // Overhead account, not customer work. The sheet leaves the customer cell
+  // blank; client_name is NOT NULL, so it carries INTERNAL as a placeholder.
+  ["09400", "SHOP OVERHEAD", "INTERNAL"],
   ["24163", "UOP CHEVRON 11TH & 12TH FLOORS", "FIRST AMERICAN"],
   ["24271", "VA UD 6E", "R & B MECHANICAL"],
   ["25427", "BELMONT CITY MEDICAL RECORDS", "SENTRY"],
@@ -31,11 +35,11 @@ const JOBS: Array<[string, string, string]> = [
   ["25533", "IH - LAH LATROBE CENTRAL STERILE", "IH - LATROBE"],
   ["25548", "UPMC SOUTHSIDE SSDC", "SENTRY"],
   ["25563", "PSU CLASSROOMS", "WAYNE CROUSE"],
-  ["25626", "WASHINGTON HOSPITAL BEHVIORAL HEALTH", "WALLER"],
+  ["25626", "WASHINGTON HOSPITAL BEHAVIORAL HEALTH", "WALLER"],
   ["25628", "BUTLER PET CT", "ARTECH GROUP"],
   ["25647", "CLEARWATER CONSERVANCY", "WAYNE CROUSE"],
   ["25693", "UPMC WASHINGTON HOSP. LINAC REPLACEMENT", "SENTRY"],
-  ["25698", "WESTINGHOUSE BLAIRESVILLE CAFE", "ARTECH GROUP"],
+  ["25698", "WESTINGHOUSE BLAIRSVILLE CAFE", "ARTECH GROUP"],
   ["25700", "MSA EXHAUST DUCT LAB EQUIPMENT", "MSA"],
   ["25727", "IH - WRH MAIN ENTRANCE LOBBY", "ARTECH GROUP"],
   ["26100", "IH - NORWIN MRI", "ARTECH GROUP"],
@@ -56,7 +60,7 @@ const JOBS: Array<[string, string, string]> = [
   ["26338", "IRMC IASA MED GAS", "IRMC"],
   ["26339", "IRMC MAB ONCOLOGY ACCESS DOORS", "IRMC"],
   ["26349", "ST.CLAIR HOSPITAL FLUE FLASHING", "WAYNE CROUSE"],
-  ["26350", "IH - WESTMORELAND SPLIT SYSTEM HEMOTOLOGY", "IH - WESTMORELAND"],
+  ["26350", "IH - WESTMORELAND SPLIT SYSTEM HEMATOLOGY", "IH - WESTMORELAND"],
   ["26360", "IUP LEONARD HALL TEMP COM SPACE", "LIMBACH"],
   ["26365", "BAKER HUGHES TALLMADGE", "ARTECH GROUP"],
   ["26391", "DNP FILTER RACKS", "DNP"],
@@ -65,14 +69,14 @@ const JOBS: Array<[string, string, string]> = [
   ["26404", "IH WESTMORELAND COFFEE SHOP", "IH - WESTMORELAND"],
   ["26406", "IRMC PENNINGTON CONSTRUCTION", "IRMC/PENNINGTON"],
   ["26414", "IH-FRICK MINI SPLIT", "IH-FRICK"],
-  ["26415", "IH-WRH MORORIZED DAMPERS", "IH-WESTMORELAND"],
+  ["26415", "IH-WRH MOTORIZED DAMPERS", "IH-WESTMORELAND"],
   ["26417", "IH - WESTMORELAND CARDIAC EXP. #5", "ARTECH GROUP"],
   ["26422", "PAWLAK MSA BLDG D2", "PAWLAK"],
   ["26424", "IH - NORWIN RTU4 REPAIRS", "IH - NORWIN"],
   ["26437", "IRMC IASA 3RD FLOOR", "LIMBACH"],
   ["26450", "MSA MURRYSVILLE LAB EF AND DUCT", "MSA"],
   ["26452", "PAH NEW STORAGE", "OVERDORF SNYDER"],
-  ["26454", "CVS MONREVILLE", "FORTNEY & WEYGANDT"],
+  ["26454", "CVS MONROEVILLE", "FORTNEY & WEYGANDT"],
   ["26462", "MCDONALDS WESTMORELAND MALL", "WESTMORELAND MALL"],
   ["26465", "LOCAL 354 FUME COLLECTOR EXHAUST DUCT", "LOCAL 354"],
   ["26467", "DNP FLEX", "DNP"],
@@ -126,13 +130,19 @@ async function main() {
   const now = new Date().toISOString();
   let inserted = 0;
   const skipped: string[] = [];
+  const corrected: string[] = [];
 
   // One transaction: either the whole board ends up correct, or nothing changed.
   sqlite.transaction(() => {
     if (wipe) sqlite.prepare("DELETE FROM jobs").run();
     if (wipeActivity) sqlite.prepare("DELETE FROM activity_log").run();
 
-    const exists = sqlite.prepare("SELECT 1 FROM jobs WHERE job_number = ?");
+    const currentRow = sqlite.prepare(
+      "SELECT id, job_name, client_name FROM jobs WHERE job_number = ?",
+    );
+    const updateJob = sqlite.prepare(
+      "UPDATE jobs SET job_name = ?, client_name = ? WHERE id = ?",
+    );
     const insertJob = sqlite.prepare(
       `INSERT INTO jobs (job_number, job_name, client_name, created_by, created_at)
        VALUES (?, ?, ?, ?, ?)`,
@@ -143,7 +153,22 @@ async function main() {
     );
 
     for (const [jobNumber, jobName, clientName] of JOBS) {
-      if (exists.get(jobNumber)) { skipped.push(jobNumber); continue; }
+      const current = currentRow.get(jobNumber) as
+        | { id: number; job_name: string; client_name: string }
+        | undefined;
+
+      if (current) {
+        // Already on the board. Bring its name and customer into line with the
+        // sheet if they drifted, so re-running applies corrections instead of
+        // silently skipping them.
+        if (current.job_name !== jobName || current.client_name !== clientName) {
+          updateJob.run(jobName, clientName, current.id);
+          corrected.push(`${jobNumber}: "${current.job_name}" -> "${jobName}"`);
+        } else {
+          skipped.push(jobNumber);
+        }
+        continue;
+      }
       const info = insertJob.run(jobNumber, jobName, clientName, IMPORTED_BY, now);
       insertActivity.run(
         info.lastInsertRowid as number, jobNumber, jobName, IMPORTED_BY,
@@ -159,7 +184,11 @@ async function main() {
   ).m;
 
   console.log(`\nImported : ${inserted}`);
-  if (skipped.length) console.log(`Skipped  : ${skipped.length} already present (${skipped.join(", ")})`);
+  if (corrected.length) {
+    console.log(`Corrected: ${corrected.length}`);
+    for (const c of corrected) console.log(`   ${c}`);
+  }
+  if (skipped.length) console.log(`Skipped  : ${skipped.length} already correct`);
   console.log(`On board : ${total} job(s)`);
   console.log(`Highest job number: ${maxNum}  ->  next new job will be ${(maxNum ?? 0) + 1}\n`);
   process.exit(0);
