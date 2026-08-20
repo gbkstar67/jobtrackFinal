@@ -4,7 +4,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import AppShell from "@/components/AppShell";
-import { AVATAR_COLORS, getInitials } from "@/components/AppShell";
+import { getInitials } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -37,13 +37,8 @@ import { z } from "zod";
 import {
   PlusIcon,
   SearchIcon,
-  BriefcaseIcon,
-  CheckCircleIcon,
-  ClockIcon,
-  PauseCircleIcon,
   ChevronRightIcon,
   HardHatIcon,
-  CalendarIcon,
   UserIcon,
 } from "lucide-react";
 
@@ -54,18 +49,10 @@ const formSchema = insertJobSchema.extend({
 
 type FormData = z.infer<typeof formSchema>;
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof ClockIcon }> = {
-  pending: { label: "Pending", color: "status-pending", icon: ClockIcon },
-  in_progress: { label: "In Progress", color: "status-in_progress", icon: BriefcaseIcon },
-  completed: { label: "Completed", color: "status-completed", icon: CheckCircleIcon },
-  on_hold: { label: "On Hold", color: "status-on_hold", icon: PauseCircleIcon },
-};
-
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -83,11 +70,8 @@ export default function Dashboard() {
       clientPhone: "",
       clientEmail: "",
       clientAddress: "",
-      status: "pending",
       assignedTo: null,
-      createdBy: null,
       startDate: "",
-      dueDate: "",
       notes: "",
     },
   });
@@ -115,46 +99,23 @@ export default function Dashboard() {
     createMutation.mutate(payload as InsertJob);
   };
 
+  // Job number, job name and client name all stay searchable, so whichever one
+  // someone happens to remember will find the row.
   const filteredJobs = jobs.filter((job) => {
+    const q = search.toLowerCase();
     const matchesSearch =
       search === "" ||
-      job.jobName.toLowerCase().includes(search.toLowerCase()) ||
-      job.jobNumber.toLowerCase().includes(search.toLowerCase()) ||
-      job.clientName.toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === "all" || job.status === statusFilter;
+      job.jobName.toLowerCase().includes(q) ||
+      job.jobNumber.toLowerCase().includes(q) ||
+      job.clientName.toLowerCase().includes(q);
     const matchesAssignee =
       assigneeFilter === "all" ||
       (assigneeFilter === "unassigned" ? !job.assignedTo : String(job.assignedTo) === assigneeFilter);
-    return matchesSearch && matchesStatus && matchesAssignee;
+    return matchesSearch && matchesAssignee;
   });
-
-  const stats = {
-    total: jobs.length,
-    in_progress: jobs.filter((j) => j.status === "in_progress").length,
-    completed: jobs.filter((j) => j.status === "completed").length,
-    pending: jobs.filter((j) => j.status === "pending").length,
-  };
 
   return (
     <AppShell>
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Total Jobs", value: stats.total, icon: HardHatIcon, accent: "text-foreground" },
-          { label: "In Progress", value: stats.in_progress, icon: BriefcaseIcon, accent: "text-orange-400" },
-          { label: "Completed", value: stats.completed, icon: CheckCircleIcon, accent: "text-green-400" },
-          { label: "Pending", value: stats.pending, icon: ClockIcon, accent: "text-slate-400" },
-        ].map((stat) => (
-          <div key={stat.label} data-testid={`stat-${stat.label.toLowerCase().replace(" ", "-")}`} className="bg-card border border-border rounded-lg p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">{stat.label}</span>
-              <stat.icon className={`w-4 h-4 ${stat.accent}`} />
-            </div>
-            <p className={`font-display text-2xl font-bold ${stat.accent}`}>{stat.value}</p>
-          </div>
-        ))}
-      </div>
-
       {/* Search & Filter Row */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
@@ -167,18 +128,6 @@ export default function Dashboard() {
             className="pl-9 bg-card border-border text-foreground placeholder:text-muted-foreground"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger data-testid="select-status-filter" className="w-full sm:w-40 bg-card border-border text-foreground">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-card border-border text-foreground">
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="in_progress">In Progress</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="on_hold">On Hold</SelectItem>
-          </SelectContent>
-        </Select>
         {activeEmployees.length > 0 && (
           <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
             <SelectTrigger data-testid="select-assignee-filter" className="w-full sm:w-44 bg-card border-border text-foreground">
@@ -262,22 +211,12 @@ export default function Dashboard() {
                 )} />
 
                 <div className="grid grid-cols-2 gap-3">
-                  <FormField control={form.control} name="status" render={({ field }) => (
+                  <FormField control={form.control} name="startDate" render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Status</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-status" className="bg-secondary border-border text-foreground">
-                            <SelectValue placeholder="Select status" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent className="bg-card border-border text-foreground">
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="in_progress">In Progress</SelectItem>
-                          <SelectItem value="completed">Completed</SelectItem>
-                          <SelectItem value="on_hold">On Hold</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <FormLabel className="text-sm font-medium text-foreground">Start Date</FormLabel>
+                      <FormControl>
+                        <Input data-testid="input-start-date" type="date" className="bg-secondary border-border text-foreground" {...field} value={field.value ?? ""} />
+                      </FormControl>
                     </FormItem>
                   )} />
 
@@ -311,25 +250,6 @@ export default function Dashboard() {
                       </FormItem>
                     )} />
                   )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField control={form.control} name="startDate" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Start Date</FormLabel>
-                      <FormControl>
-                        <Input data-testid="input-start-date" type="date" className="bg-secondary border-border text-foreground" {...field} value={field.value ?? ""} />
-                      </FormControl>
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="dueDate" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-sm font-medium text-foreground">Due Date</FormLabel>
-                      <FormControl>
-                        <Input data-testid="input-due-date" type="date" className="bg-secondary border-border text-foreground" {...field} value={field.value ?? ""} />
-                      </FormControl>
-                    </FormItem>
-                  )} />
                 </div>
 
                 <FormField control={form.control} name="notes" render={({ field }) => (
@@ -379,45 +299,27 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Desktop header */}
-            <div className="hidden sm:grid grid-cols-[120px_1fr_1fr_100px_120px_100px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/30">
+            <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_100px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/30">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Job #</span>
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Job Name</span>
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client</span>
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Due Date</span>
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</span>
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assigned</span>
               <span className="sr-only">Go</span>
             </div>
 
             <div className="divide-y divide-border">
               {filteredJobs.map((job) => {
-                const statusCfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.pending;
-                const StatusIcon = statusCfg.icon;
                 const assignee = job.assignedTo ? empMap.get(job.assignedTo) : null;
                 return (
                   <button key={job.id} data-testid={`row-job-${job.id}`} onClick={() => navigate(`/job/${job.id}`)} className="job-row w-full text-left">
                     {/* Desktop */}
-                    <div className="hidden sm:grid grid-cols-[120px_1fr_1fr_100px_120px_100px_28px] gap-3 px-4 py-3.5 items-center">
+                    <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_100px_28px] gap-3 px-4 py-3.5 items-center">
                       <span data-testid={`text-job-number-${job.id}`} className="font-mono text-sm font-semibold text-primary">{job.jobNumber}</span>
                       <span className="text-sm font-medium text-foreground truncate">{job.jobName}</span>
                       <div className="flex items-center gap-2 min-w-0">
                         <UserIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                         <span className="text-sm text-muted-foreground truncate">{job.clientName}</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        {job.dueDate ? (
-                          <>
-                            <CalendarIcon className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(job.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                            </span>
-                          </>
-                        ) : <span className="text-xs text-muted-foreground/40">—</span>}
-                      </div>
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full w-fit ${statusCfg.color}`}>
-                        <StatusIcon className="w-3 h-3" />
-                        {statusCfg.label}
-                      </span>
                       <div>
                         {assignee ? (
                           <span className={`w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center text-white ${assignee.color}`} title={assignee.name}>
@@ -435,25 +337,15 @@ export default function Dashboard() {
                           <span className="font-mono text-xs font-bold text-primary block">{job.jobNumber}</span>
                           <span className="text-sm font-medium text-foreground">{job.jobName}</span>
                         </div>
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${statusCfg.color}`}>
-                          {statusCfg.label}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><UserIcon className="w-3 h-3" />{job.clientName}</span>
                         {assignee && (
-                          <span className="flex items-center gap-1">
-                            <span className={`w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center text-white ${assignee.color}`}>{getInitials(assignee.name)}</span>
-                            {assignee.name.split(" ")[0]}
-                          </span>
-                        )}
-                        {job.dueDate && (
-                          <span className="flex items-center gap-1">
-                            <CalendarIcon className="w-3 h-3" />
-                            {new Date(job.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          <span className={`w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center text-white flex-shrink-0 ${assignee.color}`} title={assignee.name}>
+                            {getInitials(assignee.name)}
                           </span>
                         )}
                       </div>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <UserIcon className="w-3 h-3" />{job.clientName}
+                      </span>
                     </div>
                   </button>
                 );

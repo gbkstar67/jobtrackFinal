@@ -60,12 +60,9 @@ export const jobs = sqliteTable("jobs", {
   clientPhone: text("client_phone"),
   clientEmail: text("client_email"),
   clientAddress: text("client_address"),
-  status: text("status").notNull().default("pending"),
   assignedTo: integer("assigned_to"),        // employee id
   createdBy: integer("created_by"),          // employee id
   startDate: text("start_date"),
-  dueDate: text("due_date"),
-  completedDate: text("completed_date"),
   notes: text("notes"),
   createdAt: text("created_at").notNull(),
 });
@@ -83,8 +80,18 @@ export type Job = typeof jobs.$inferSelect;
 export const activityLog = sqliteTable("activity_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   jobId: integer("job_id").notNull(),
+
+  // The job's identity is copied in at write time rather than joined at read
+  // time. Deleting a job leaves its history behind pointing at an id that no
+  // longer resolves, and the activity page used to render those rows blank.
+  //
+  // Deliberately NOT a foreign key with ON DELETE CASCADE: cascading would
+  // delete exactly the history this table exists to keep.
+  jobNumber: text("job_number"),
+  jobName: text("job_name"),
+
   employeeId: integer("employee_id"),
-  action: text("action").notNull(),          // "created", "updated", "status_changed", "assigned", "deleted"
+  action: text("action").notNull(),          // "created", "updated", "assigned", "deleted"
   details: text("details"),                  // human-readable description
   timestamp: text("timestamp").notNull(),
 });

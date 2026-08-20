@@ -138,7 +138,7 @@ export default function TeamPage() {
   };
 
   const getJobCount = (empId: number) =>
-    jobs.filter((j) => j.assignedTo === empId && j.status !== "completed").length;
+    jobs.filter((j) => j.assignedTo === empId).length;
 
   return (
     <AppShell>

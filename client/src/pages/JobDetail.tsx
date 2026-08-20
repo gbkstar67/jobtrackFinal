@@ -41,10 +41,6 @@ import {
   CalendarIcon,
   UserIcon,
   HashIcon,
-  BriefcaseIcon,
-  CheckCircleIcon,
-  ClockIcon,
-  PauseCircleIcon,
   PlusCircleIcon,
   EditIcon,
   ArrowRightLeftIcon,
@@ -52,13 +48,8 @@ import {
   ActivityIcon,
 } from "lucide-react";
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof ClockIcon }> = {
-  pending: { label: "Pending", color: "status-pending", icon: ClockIcon },
-  in_progress: { label: "In Progress", color: "status-in_progress", icon: BriefcaseIcon },
-  completed: { label: "Completed", color: "status-completed", icon: CheckCircleIcon },
-  on_hold: { label: "On Hold", color: "status-on_hold", icon: PauseCircleIcon },
-};
-
+// status_changed is retained here even though nothing writes it any more:
+// activity rows recorded before status was removed still need to render.
 const ACTION_ICONS: Record<string, typeof PlusCircleIcon> = {
   created: PlusCircleIcon,
   updated: EditIcon,
@@ -125,12 +116,9 @@ export default function JobDetail() {
           clientPhone: job.clientPhone ?? "",
           clientEmail: job.clientEmail ?? "",
           clientAddress: job.clientAddress ?? "",
-          status: job.status,
           assignedTo: job.assignedTo ?? null,
           createdBy: job.createdBy ?? null,
           startDate: job.startDate ?? "",
-          dueDate: job.dueDate ?? "",
-          completedDate: job.completedDate ?? "",
           notes: job.notes ?? "",
         }
       : undefined,
@@ -191,8 +179,6 @@ export default function JobDetail() {
     );
   }
 
-  const statusCfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.pending;
-  const StatusIcon = statusCfg.icon;
   const assignee = job.assignedTo ? empMap.get(job.assignedTo) : null;
   const creator = job.createdBy ? empMap.get(job.createdBy) : null;
 
@@ -293,30 +279,6 @@ export default function JobDetail() {
               </div>
             ) : null}
 
-            {/* Status */}
-            {isEditing ? (
-              <Form {...form}>
-                <FormField control={form.control} name="status" render={({ field }) => (
-                  <FormItem>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-edit-status" className="w-40 bg-secondary border-border text-foreground"><SelectValue /></SelectTrigger>
-                      </FormControl>
-                      <SelectContent className="bg-card border-border text-foreground">
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="in_progress">In Progress</SelectItem>
-                        <SelectItem value="completed">Completed</SelectItem>
-                        <SelectItem value="on_hold">On Hold</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </FormItem>
-                )} />
-              </Form>
-            ) : (
-              <span data-testid="status-badge" className={`inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-full ${statusCfg.color}`}>
-                <StatusIcon className="w-4 h-4" /> {statusCfg.label}
-              </span>
-            )}
           </div>
         </div>
 
@@ -370,29 +332,23 @@ export default function JobDetail() {
             {isEditing ? (
               <Form {...form}>
                 <div className="space-y-3">
-                  {(["startDate", "dueDate", "completedDate"] as const).map((f) => (
-                    <FormField key={f} control={form.control} name={f} render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-xs text-muted-foreground capitalize">
-                          {f === "startDate" ? "Start Date" : f === "dueDate" ? "Due Date" : "Completed Date"}
-                        </FormLabel>
-                        <FormControl>
-                          <Input type="date" className="bg-secondary border-border text-foreground h-8 text-sm" {...field} value={field.value ?? ""} />
-                        </FormControl>
-                      </FormItem>
-                    )} />
-                  ))}
+                  <FormField control={form.control} name="startDate" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-muted-foreground">Start Date</FormLabel>
+                      <FormControl>
+                        <Input data-testid="input-edit-start-date" type="date" className="bg-secondary border-border text-foreground h-8 text-sm" {...field} value={field.value ?? ""} />
+                      </FormControl>
+                    </FormItem>
+                  )} />
                 </div>
               </Form>
             ) : (
               <div className="space-y-3">
-                {[{ label: "Start Date", value: job.startDate }, { label: "Due Date", value: job.dueDate }, { label: "Completed", value: job.completedDate }].map(({ label, value }) => (
-                  <div key={label}><p className="text-xs text-muted-foreground mb-0.5">{label}</p>
-                    <p className="text-sm font-medium text-foreground">
-                      {value ? new Date(value + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" }) : <span className="text-muted-foreground/40">—</span>}
-                    </p>
-                  </div>
-                ))}
+                <div><p className="text-xs text-muted-foreground mb-0.5">Start Date</p>
+                  <p data-testid="text-start-date" className="text-sm font-medium text-foreground">
+                    {job.startDate ? new Date(job.startDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" }) : <span className="text-muted-foreground/40">—</span>}
+                  </p>
+                </div>
               </div>
             )}
           </div>

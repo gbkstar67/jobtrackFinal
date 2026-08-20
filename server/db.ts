@@ -107,6 +107,42 @@ const MIGRATIONS: Array<(d: Database.Database) => void> = [
       CREATE INDEX IF NOT EXISTS sessions_expires ON sessions (expires);
     `);
   },
+
+  // ── 2: activity log keeps the job's identity ──
+  // Copy job_number / job_name onto each row so the trail stays readable after
+  // a job is deleted. Backfilled from the jobs still present; rows whose job is
+  // already gone keep NULL and fall back to whatever their details text says.
+  (d) => {
+    addColumn(d, "activity_log", "job_number", "TEXT");
+    addColumn(d, "activity_log", "job_name", "TEXT");
+
+    d.exec(`
+      UPDATE activity_log
+         SET job_number = (SELECT j.job_number FROM jobs j WHERE j.id = activity_log.job_id),
+             job_name   = (SELECT j.job_name   FROM jobs j WHERE j.id = activity_log.job_id)
+       WHERE job_number IS NULL
+         AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = activity_log.job_id);
+    `);
+  },
+
+  // ── 3: drop status and the two dates we no longer track ──
+  //
+  // DESTRUCTIVE. Every job's status, due date and completed date is removed
+  // here and cannot be recovered from the database afterwards. The rows
+  // themselves are untouched: job numbers, names, client details, notes,
+  // assignments, start dates and the whole activity log all survive.
+  //
+  // start_date is deliberately kept.
+  //
+  // Backup first via GET /api/admin/backup, which shipped in the auth commit.
+  (d) => {
+    for (const column of ["status", "due_date", "completed_date"]) {
+      const columns = d.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
+      if (columns.some((c) => c.name === column)) {
+        d.exec(`ALTER TABLE jobs DROP COLUMN ${column}`);
+      }
+    }
+  },
 ];
 
 function runMigrations(d: Database.Database) {

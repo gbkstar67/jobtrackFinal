@@ -138,6 +138,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
     storage.logActivity({
       jobId: job.id,
+      jobNumber: job.jobNumber,
+      jobName: job.jobName,
       employeeId: me.id,
       action: "created",
       details: `${me.name} created job ${job.jobNumber}`,
@@ -161,19 +163,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Was `req.body._changedBy` — any caller could attribute an edit to anyone.
     const me = actor(req);
 
-    if (result.data.status && result.data.status !== oldJob.status) {
-      storage.logActivity({
-        jobId: id,
-        employeeId: me.id,
-        action: "status_changed",
-        details: `${me.name} changed status from ${oldJob.status} to ${result.data.status}`,
-        timestamp: new Date().toISOString(),
-      });
-    }
     if (result.data.assignedTo !== undefined && result.data.assignedTo !== oldJob.assignedTo) {
       const assignee = result.data.assignedTo ? storage.getEmployee(result.data.assignedTo) : null;
       storage.logActivity({
         jobId: id,
+        jobNumber: oldJob.jobNumber,
+        jobName: oldJob.jobName,
         employeeId: me.id,
         action: "assigned",
         details: assignee ? `${me.name} assigned job to ${assignee.name}` : `${me.name} unassigned job`,
@@ -181,11 +176,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       });
     }
     // General update log for other changes
-    const skipKeys = ["status", "assignedTo"];
+    const skipKeys = ["assignedTo"];
     const otherChanges = Object.keys(result.data).filter((k) => !skipKeys.includes(k));
     if (otherChanges.length > 0) {
       storage.logActivity({
         jobId: id,
+        jobNumber: updatedJob.jobNumber,
+        jobName: updatedJob.jobName,
         employeeId: me.id,
         action: "updated",
         details: `${me.name} updated ${otherChanges.join(", ")}`,
@@ -209,6 +206,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // would delete exactly the history this record exists to preserve.
     storage.logActivity({
       jobId: job.id,
+      jobNumber: job.jobNumber,
+      jobName: job.jobName,
       employeeId: me.id,
       action: "deleted",
       details: `${me.name} deleted job ${job.jobNumber} (${job.jobName})`,

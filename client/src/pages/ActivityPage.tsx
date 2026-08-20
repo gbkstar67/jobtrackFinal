@@ -12,6 +12,8 @@ import {
   ActivityIcon,
 } from "lucide-react";
 
+// status_changed is retained here even though nothing writes it any more:
+// activity rows recorded before status was removed still need to render.
 const ACTION_ICONS: Record<string, typeof PlusCircleIcon> = {
   created: PlusCircleIcon,
   updated: EditIcon,
@@ -48,7 +50,9 @@ export default function ActivityPage() {
   const { data: jobs = [] } = useQuery<Job[]>({ queryKey: ["/api/jobs"] });
 
   const empMap = new Map(employees.map((e) => [e.id, e]));
-  const jobMap = new Map(jobs.map((j) => [j.id, j]));
+  // Only used to decide whether the job number should be a link — the number
+  // itself now comes off the activity row, so deleted jobs still show theirs.
+  const liveJobIds = new Set(jobs.map((j) => j.id));
 
   return (
     <AppShell>
@@ -79,7 +83,7 @@ export default function ActivityPage() {
               const Icon = ACTION_ICONS[act.action] || EditIcon;
               const color = ACTION_COLORS[act.action] || "text-muted-foreground";
               const emp = act.employeeId ? empMap.get(act.employeeId) : null;
-              const job = jobMap.get(act.jobId);
+              const jobStillExists = liveJobIds.has(act.jobId);
 
               return (
                 <div key={act.id} className="px-4 py-3.5 flex items-start gap-3">
@@ -91,13 +95,24 @@ export default function ActivityPage() {
                       {act.details}
                     </p>
                     <div className="flex items-center gap-3 mt-1">
-                      {job && act.action !== "deleted" && (
-                        <button
-                          onClick={() => navigate(`/job/${job.id}`)}
-                          className="text-xs text-primary hover:underline font-mono font-semibold"
-                        >
-                          {job.jobNumber}
-                        </button>
+                      {act.jobNumber && (
+                        jobStillExists && act.action !== "deleted" ? (
+                          <button
+                            onClick={() => navigate(`/job/${act.jobId}`)}
+                            className="text-xs text-primary hover:underline font-mono font-semibold"
+                          >
+                            {act.jobNumber}
+                          </button>
+                        ) : (
+                          // The job is gone; show its number as plain text so the
+                          // trail still reads properly instead of rendering blank.
+                          <span
+                            className="text-xs text-muted-foreground font-mono font-semibold"
+                            title={act.jobName ?? undefined}
+                          >
+                            {act.jobNumber}
+                          </span>
+                        )
                       )}
                       <span className="text-xs text-muted-foreground">{timeAgo(act.timestamp)}</span>
                     </div>

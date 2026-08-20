@@ -29,12 +29,6 @@
   --ring: 28 95% 52%;
   --radius: 0.5rem;
 
-  /* Status colors */
-  --status-pending: 220 14% 55%;
-  --status-inprogress: 28 95% 52%;
-  --status-completed: 142 60% 42%;
-  --status-onhold: 45 90% 55%;
-
   /* Font families */
   --font-display: 'Cabinet Grotesk', 'General Sans', sans-serif;
   --font-body: 'General Sans', sans-serif;
@@ -98,20 +92,6 @@ body {
 /* === CUSTOM UTILITIES === */
 .font-display {
   font-family: var(--font-display);
-}
-
-/* Status badge styles */
-.status-pending {
-  @apply bg-slate-700 text-slate-300;
-}
-.status-in_progress {
-  @apply bg-orange-500/20 text-orange-400 border border-orange-500/30;
-}
-.status-completed {
-  @apply bg-green-500/20 text-green-400 border border-green-500/30;
-}
-.status-on_hold {
-  @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30;
 }
 
 /* Subtle row hover */
