@@ -149,6 +149,75 @@ export type BillingType = keyof typeof BILLING_TYPE;
 export type InsertJob = z.infer<typeof insertJobSchema>;
 export type Job = typeof jobs.$inferSelect;
 
+// ── Tasks ──
+// A task belongs to a job, which is the thing that makes this different from a
+// generic to-do app: "call the engineer" is useless on its own, "call the
+// engineer about 26350" is the whole point. jobId is required for that reason.
+//
+// dueDate is a plain YYYY-MM-DD so a task can sit on a day without implying a
+// time; dueTime is the separate optional field that puts it on the calendar.
+// Keeping them apart is what lets "Friday" and "site walk at 7" coexist.
+export const tasks = sqliteTable("tasks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
+  jobId: integer("job_id").notNull(),
+
+  title: text("title").notNull(),
+  notes: text("notes"),
+
+  dueDate: text("due_date"),              // YYYY-MM-DD
+  dueTime: text("due_time"),              // HH:MM, 24h — presence puts it on the calendar
+  priority: text("priority").notNull().default("normal"), // "normal" | "urgent"
+
+  assignedTo: integer("assigned_to"),     // employee id, null = whoever picks it up
+  createdBy: integer("created_by"),
+
+  // Repeats are stored as a rule plus the anchor, and the NEXT occurrence is
+  // materialised on completion rather than generating rows ahead of time —
+  // otherwise "every Monday" quietly becomes an unbounded table.
+  repeatRule: text("repeat_rule"),        // null | "daily" | "weekly" | "biweekly" | "monthly"
+
+  // Reminders are a stored instant so the notifier can sweep for what's due
+  // without recomputing offsets for every task on every tick.
+  remindAt: text("remind_at"),            // ISO instant
+  reminderSentAt: text("reminder_sent_at"),
+
+  completedAt: text("completed_at"),      // null = open
+  completedBy: integer("completed_by"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const TASK_PRIORITY = { normal: "Normal", urgent: "Urgent" } as const;
+export const REPEAT_RULES = {
+  daily: "Every day",
+  weekly: "Every week",
+  biweekly: "Every two weeks",
+  monthly: "Every month",
+} as const;
+export type RepeatRule = keyof typeof REPEAT_RULES;
+
+export const insertTaskSchema = createInsertSchema(tasks)
+  .omit({
+    id: true,
+    companyId: true,      // from the session
+    createdBy: true,      // from the session
+    completedAt: true,    // set by the complete/reopen endpoints, not by a write
+    completedBy: true,
+    reminderSentAt: true, // owned by the notifier
+    createdAt: true,
+  })
+  .extend({
+    title: z.string().trim().min(1, "A title is required"),
+    jobId: z.number().int().positive(),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").nullable().optional(),
+    dueTime: z.string().regex(/^\d{2}:\d{2}$/, "Use HH:MM").nullable().optional(),
+    priority: z.enum(["normal", "urgent"]).optional(),
+    repeatRule: z.enum(["daily", "weekly", "biweekly", "monthly"]).nullable().optional(),
+  });
+
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+export type Task = typeof tasks.$inferSelect;
+
 // ── Activity Log ──
 export const activityLog = sqliteTable("activity_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),

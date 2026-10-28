@@ -272,6 +272,37 @@ const MIGRATIONS: Array<(d: Database.Database) => void> = [
       }
     }
   },
+
+  // ── 7: tasks ──
+  // What's owed on each job: submittals, deliveries, inspections, calls.
+  // Indexed for the two reads that happen constantly — "everything open for my
+  // company, overdue first" and "everything on this job".
+  (d) => {
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        job_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        notes TEXT,
+        due_date TEXT,
+        due_time TEXT,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        assigned_to INTEGER,
+        created_by INTEGER,
+        repeat_rule TEXT,
+        remind_at TEXT,
+        reminder_sent_at TEXT,
+        completed_at TEXT,
+        completed_by INTEGER,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS tasks_company_open ON tasks (company_id, completed_at, due_date);
+      CREATE INDEX IF NOT EXISTS tasks_job ON tasks (company_id, job_id);
+      CREATE INDEX IF NOT EXISTS tasks_reminders ON tasks (remind_at) WHERE remind_at IS NOT NULL AND reminder_sent_at IS NULL;
+    `);
+  },
 ];
 
 function runMigrations(d: Database.Database) {

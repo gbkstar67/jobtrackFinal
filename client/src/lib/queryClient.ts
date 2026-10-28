@@ -48,7 +48,14 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(`${API_BASE}${queryKey.join("/")}`, { credentials: "include" });
+    // Key parts join with "/" to build the path. A part carrying a query
+    // string must therefore be the last one, or the "?" ends up mid-path —
+    // which silently matches a /:id route instead of erroring.
+    const path = queryKey.join("/");
+    if (path.indexOf("?") !== -1 && path.indexOf("?") !== path.lastIndexOf("/") - 0 && /\?[^/]*\//.test(path)) {
+      throw new Error(`Query key builds an invalid URL (params before a path segment): ${path}`);
+    }
+    const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
 
     if (res.status === 401) {
       if (unauthorizedBehavior === "returnNull") return null;
@@ -58,6 +65,24 @@ export const getQueryFn: <T>(options: {
     await throwIfResNotOk(res);
     return await res.json();
   };
+
+/**
+ * Invalidate every cached query whose URL starts with `path`.
+ *
+ * Query keys here are whole URLs, including any query string, because the
+ * default queryFn joins key parts with "/". That means React Query's normal
+ * prefix matching does NOT work: the key ["/api/tasks?view=today"] does not
+ * start with ["/api/tasks"], so invalidating the latter silently matches
+ * nothing and a completed task stays on screen. Match on the string instead.
+ */
+export function invalidatePath(path: string) {
+  return queryClient.invalidateQueries({
+    predicate: (query) => {
+      const first = query.queryKey[0];
+      return typeof first === "string" && (first === path || first.startsWith(`${path}?`));
+    },
+  });
+}
 
 export const queryClient = new QueryClient({
   defaultOptions: {

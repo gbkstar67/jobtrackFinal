@@ -1,10 +1,11 @@
 import { db, sqlite } from "./db";
 import {
-  jobs, employees, activityLog, companies, employeePublicColumns,
+  jobs, employees, activityLog, companies, tasks, employeePublicColumns,
   type Job, type InsertJob,
   type Employee, type EmployeeRow, type InsertEmployee,
   type Activity, type InsertActivity,
   type Company,
+  type Task, type InsertTask, type RepeatRule,
 } from "@shared/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 
@@ -46,6 +47,35 @@ export interface IStorage {
   // Activity
   getActivities(companyId: number, jobId?: number): Activity[];
   logActivity(companyId: number, entry: InsertActivity): Activity;
+
+  // Tasks
+  getTasks(companyId: number, opts?: TaskQuery): Task[];
+  getTask(companyId: number, id: number): Task | undefined;
+  createTask(companyId: number, task: InsertTask, createdBy: number): Task;
+  updateTask(companyId: number, id: number, updates: Partial<InsertTask>): Task | undefined;
+  completeTask(companyId: number, id: number, by: number): { task: Task; nextOccurrence: Task | null } | undefined;
+  reopenTask(companyId: number, id: number): Task | undefined;
+  deleteTask(companyId: number, id: number): boolean;
+  getJobTaskSummary(companyId: number, today: string): Map<number, JobTaskSummary>;
+}
+
+/**
+ * `today` is always supplied by the caller as the viewer's own YYYY-MM-DD, never
+ * computed server-side. Railway runs UTC, so a server-computed "today" would
+ * roll over at 8pm in Pennsylvania and show tomorrow's work as due now.
+ */
+export interface TaskQuery {
+  view?: "open" | "today" | "upcoming" | "done" | "all";
+  today?: string;
+  jobId?: number;
+  assignedTo?: number | "unassigned";
+  priority?: "normal" | "urgent";
+}
+
+export interface JobTaskSummary {
+  open: number;
+  overdue: number;
+  nextDue: string | null;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -280,6 +310,150 @@ export class DatabaseStorage implements IStorage {
     return db.insert(activityLog).values({ ...entry, companyId }).returning().get();
   }
 
+  // ── Tasks ──
+
+  getTasks(companyId: number, opts: TaskQuery = {}): Task[] {
+    const { view = "open", today, jobId, assignedTo, priority } = opts;
+    const where: any[] = [eq(tasks.companyId, companyId)];
+
+    if (jobId) where.push(eq(tasks.jobId, jobId));
+    if (priority) where.push(eq(tasks.priority, priority));
+    if (assignedTo === "unassigned") where.push(sql`${tasks.assignedTo} IS NULL`);
+    else if (typeof assignedTo === "number") where.push(eq(tasks.assignedTo, assignedTo));
+
+    if (view === "done") {
+      where.push(sql`${tasks.completedAt} IS NOT NULL`);
+    } else if (view !== "all") {
+      where.push(sql`${tasks.completedAt} IS NULL`);
+      if (view === "today" && today) {
+        // Today means today *and* anything already late — what's late is what
+        // you need to see first, not filed under a day that has passed.
+        where.push(sql`${tasks.dueDate} IS NOT NULL AND ${tasks.dueDate} <= ${today}`);
+      } else if (view === "upcoming" && today) {
+        where.push(sql`${tasks.dueDate} IS NOT NULL AND ${tasks.dueDate} > ${today}`);
+      }
+    }
+
+    const rows = db.select().from(tasks).where(and(...where)).all();
+
+    // Ordered in JS rather than SQL because the rule is layered: overdue first,
+    // then by date with undated last, then urgent above normal, then by time.
+    const rank = (t: Task) => {
+      if (view === "done") return 0;
+      if (today && t.dueDate && t.dueDate < today) return 0; // overdue
+      if (today && t.dueDate === today) return 1;
+      if (t.dueDate) return 2;
+      return 3; // no date — sits below anything scheduled
+    };
+    return rows.sort((a, b) =>
+      rank(a) - rank(b) ||
+      (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") ||
+      (a.priority === b.priority ? 0 : a.priority === "urgent" ? -1 : 1) ||
+      (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99") ||
+      a.id - b.id,
+    );
+  }
+
+  getTask(companyId: number, id: number): Task | undefined {
+    return db.select().from(tasks).where(and(eq(tasks.id, id), eq(tasks.companyId, companyId))).get();
+  }
+
+  createTask(companyId: number, task: InsertTask, createdBy: number): Task {
+    return db
+      .insert(tasks)
+      .values({ ...task, companyId, createdBy, createdAt: new Date().toISOString() })
+      .returning()
+      .get();
+  }
+
+  updateTask(companyId: number, id: number, updates: Partial<InsertTask>): Task | undefined {
+    if (!this.getTask(companyId, id)) return undefined;
+    return db
+      .update(tasks)
+      .set(updates)
+      .where(and(eq(tasks.id, id), eq(tasks.companyId, companyId)))
+      .returning()
+      .get();
+  }
+
+  /**
+   * Tick a task off. If it repeats, the next occurrence is created here rather
+   * than generated in advance — "every Monday" materialised ahead of time is an
+   * unbounded table, and a repeat nobody completes should stop appearing.
+   */
+  completeTask(companyId: number, id: number, by: number) {
+    const existing = this.getTask(companyId, id);
+    if (!existing) return undefined;
+
+    return db.transaction((tx) => {
+      const task = tx
+        .update(tasks)
+        .set({ completedAt: new Date().toISOString(), completedBy: by })
+        .where(and(eq(tasks.id, id), eq(tasks.companyId, companyId)))
+        .returning()
+        .get();
+
+      let nextOccurrence: Task | null = null;
+      if (existing.repeatRule && existing.dueDate) {
+        const nextDue = advanceDate(existing.dueDate, existing.repeatRule as RepeatRule);
+        nextOccurrence = tx
+          .insert(tasks)
+          .values({
+            companyId,
+            jobId: existing.jobId,
+            title: existing.title,
+            notes: existing.notes,
+            dueDate: nextDue,
+            dueTime: existing.dueTime,
+            priority: existing.priority,
+            assignedTo: existing.assignedTo,
+            createdBy: existing.createdBy,
+            repeatRule: existing.repeatRule,
+            remindAt: shiftReminder(existing.remindAt, existing.dueDate, nextDue),
+            createdAt: new Date().toISOString(),
+          })
+          .returning()
+          .get();
+      }
+      return { task, nextOccurrence };
+    });
+  }
+
+  reopenTask(companyId: number, id: number): Task | undefined {
+    if (!this.getTask(companyId, id)) return undefined;
+    return db
+      .update(tasks)
+      .set({ completedAt: null, completedBy: null })
+      .where(and(eq(tasks.id, id), eq(tasks.companyId, companyId)))
+      .returning()
+      .get();
+  }
+
+  deleteTask(companyId: number, id: number): boolean {
+    return db.delete(tasks).where(and(eq(tasks.id, id), eq(tasks.companyId, companyId))).run().changes > 0;
+  }
+
+  /**
+   * Open and overdue counts plus the next deadline, per job — so the board can
+   * show which job needs attention before it turns into a problem. One query
+   * for the whole board rather than one per row.
+   */
+  getJobTaskSummary(companyId: number, today: string): Map<number, JobTaskSummary> {
+    const rows = sqlite
+      .prepare(
+        `SELECT job_id AS jobId,
+                COUNT(*) AS open,
+                SUM(CASE WHEN due_date IS NOT NULL AND due_date < ? THEN 1 ELSE 0 END) AS overdue,
+                MIN(due_date) AS nextDue
+           FROM tasks
+          WHERE company_id = ? AND completed_at IS NULL
+          GROUP BY job_id`,
+      )
+      .all(today, companyId) as Array<{ jobId: number; open: number; overdue: number; nextDue: string | null }>;
+
+    return new Map(rows.map((r) => [r.jobId, { open: r.open, overdue: r.overdue, nextDue: r.nextDue }]));
+  }
+
   /**
    * Snapshot the whole database to a file, WAL and all.
    *
@@ -291,6 +465,40 @@ export class DatabaseStorage implements IStorage {
   backupTo(destination: string): void {
     sqlite.exec(`VACUUM INTO '${destination.replace(/'/g, "''")}'`);
   }
+}
+
+/**
+ * Advance a YYYY-MM-DD by one repeat interval.
+ *
+ * Built on UTC noon rather than midnight so a daylight-saving shift can never
+ * push the result onto the neighbouring day. Month steps clamp — the 31st
+ * repeating monthly lands on the 30th in a short month rather than skidding
+ * into the next one, which is what Date would do unguarded.
+ */
+export function advanceDate(date: string, rule: RepeatRule): string {
+  const [y, m, d] = date.split("-").map(Number);
+  if (rule === "monthly") {
+    const targetMonth = m === 12 ? 1 : m + 1;
+    const targetYear = m === 12 ? y + 1 : y;
+    const lastDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
+    const day = Math.min(d, lastDay);
+    return `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  const days = rule === "daily" ? 1 : rule === "weekly" ? 7 : 14;
+  const next = new Date(Date.UTC(y, m - 1, d, 12));
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
+}
+
+/** Carry a reminder forward by the same gap it had from the old due date. */
+export function shiftReminder(
+  remindAt: string | null,
+  oldDue: string,
+  newDue: string,
+): string | null {
+  if (!remindAt) return null;
+  const gap = new Date(`${oldDue}T12:00:00Z`).getTime() - new Date(remindAt).getTime();
+  return new Date(new Date(`${newDue}T12:00:00Z`).getTime() - gap).toISOString();
 }
 
 export const storage = new DatabaseStorage();

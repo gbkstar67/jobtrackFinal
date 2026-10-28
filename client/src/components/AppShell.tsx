@@ -5,6 +5,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboardIcon,
+  ClipboardCheckIcon,
   UsersIcon,
   ActivityIcon,
   LogOutIcon,
@@ -37,7 +38,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   });
 
   const navItems = [
-    { href: "/", label: "Dashboard", icon: LayoutDashboardIcon },
+    { href: "/", label: "Jobs", icon: LayoutDashboardIcon },
+    { href: "/tasks", label: "Tasks", icon: ClipboardCheckIcon },
     { href: "/team", label: "Team", icon: UsersIcon },
     { href: "/activity", label: "Activity", icon: ActivityIcon },
   ];

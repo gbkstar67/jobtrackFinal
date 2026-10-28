@@ -4,6 +4,7 @@ import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { queryClient, getQueryFn, ME_KEY } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import Dashboard from "./pages/Dashboard";
+import TasksPage from "./pages/TasksPage";
 import JobDetail from "./pages/JobDetail";
 import TeamPage from "./pages/TeamPage";
 import ActivityPage from "./pages/ActivityPage";
@@ -31,6 +32,7 @@ function AuthenticatedApp() {
     <Router hook={useHashLocation}>
       <Switch>
         <Route path="/" component={Dashboard} />
+        <Route path="/tasks" component={TasksPage} />
         <Route path="/job/:id" component={JobDetail} />
         <Route path="/team" component={TeamPage} />
         <Route path="/activity" component={ActivityPage} />

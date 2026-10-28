@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { localToday } from "@/lib/dates";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import AppShell from "@/components/AppShell";
@@ -64,6 +65,13 @@ export default function Dashboard() {
 
   const { data: jobs = [], isLoading } = useQuery<Job[]>({ queryKey: ["/api/jobs"] });
   const { data: employees = [] } = useQuery<Employee[]>({ queryKey: ["/api/employees"] });
+
+  // Open and overdue counts for every job in one request, so a 57-job board
+  // doesn't fire 57 of them.
+  const today = localToday();
+  const { data: taskSummary = {} } = useQuery<Record<string, { open: number; overdue: number; nextDue: string | null }>>({
+    queryKey: [`/api/jobs/task-summary?today=${today}`],
+  });
   const activeEmployees = employees.filter((e) => e.active);
 
   const empMap = new Map(employees.map((e) => [e.id, e]));
@@ -340,11 +348,12 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Desktop header */}
-            <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_90px_100px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/60">
+            <div className="hidden sm:grid grid-cols-[130px_1fr_1fr_86px_86px_92px_28px] gap-3 px-4 py-2.5 border-b border-border bg-secondary/60">
               <span className="label-caps">Job #</span>
               <span className="label-caps">Job Name</span>
               <span className="label-caps">Client</span>
               <span className="label-caps">Bid / Type</span>
+              <span className="label-caps">Open</span>
               <span className="label-caps">Assigned</span>
               <span className="sr-only">Go</span>
             </div>
@@ -352,10 +361,11 @@ export default function Dashboard() {
             <div className="divide-y divide-border">
               {filteredJobs.map((job) => {
                 const assignee = job.assignedTo ? empMap.get(job.assignedTo) : null;
+                const summary = taskSummary[String(job.id)];
                 return (
                   <button key={job.id} data-testid={`row-job-${job.id}`} onClick={() => navigate(`/job/${job.id}`)} className="job-row w-full text-left">
                     {/* Desktop */}
-                    <div className="hidden sm:grid grid-cols-[140px_1fr_1fr_90px_100px_28px] gap-3 px-4 py-3.5 items-center">
+                    <div className="hidden sm:grid grid-cols-[130px_1fr_1fr_86px_86px_92px_28px] gap-3 px-4 py-3.5 items-center">
                       <span data-testid={`text-job-number-${job.id}`} className="font-mono text-sm font-bold text-primary tracking-tight">{job.jobNumber}</span>
                       <span className="text-sm font-medium text-foreground truncate">{job.jobName}</span>
                       <div className="flex items-center gap-2 min-w-0">
@@ -369,6 +379,21 @@ export default function Dashboard() {
                         {job.billingType ? (
                           <CodeBadge code={job.billingType} title={BILLING_TYPE[job.billingType as BillingType] ?? undefined} />
                         ) : null}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {summary?.open ? (
+                          <>
+                            <span className="font-mono text-sm font-bold text-foreground">{summary.open}</span>
+                            {summary.overdue > 0 && (
+                              <span
+                                title={`${summary.overdue} late`}
+                                className="rounded px-1.5 py-0.5 text-[10px] font-bold bg-destructive/10 text-destructive border border-destructive/25"
+                              >
+                                {summary.overdue} late
+                              </span>
+                            )}
+                          </>
+                        ) : <span className="text-xs text-muted-foreground/40">—</span>}
                       </div>
                       <div>
                         {assignee ? (
@@ -395,6 +420,13 @@ export default function Dashboard() {
                         </span>
                         {job.bidBy && <CodeBadge code={job.bidBy} title={BID_BY[job.bidBy as BidBy] ?? undefined} />}
                         {job.billingType && <CodeBadge code={job.billingType} title={BILLING_TYPE[job.billingType as BillingType] ?? undefined} />}
+                        {summary?.overdue ? (
+                          <span className="rounded px-1.5 py-0.5 text-[10px] font-bold bg-destructive/10 text-destructive border border-destructive/25">
+                            {summary.overdue} late
+                          </span>
+                        ) : summary?.open ? (
+                          <span className="text-[10px] text-muted-foreground">{summary.open} open</span>
+                        ) : null}
                       </div>
                     </div>
                   </button>

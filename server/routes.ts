@@ -14,7 +14,8 @@ import {
 } from "./auth";
 import { z } from "zod";
 import {
-  insertJobSchema, insertEmployeeSchema, MAX_AVATAR_BYTES, type Employee,
+  insertJobSchema, insertEmployeeSchema, insertTaskSchema,
+  MAX_AVATAR_BYTES, type Employee,
 } from "@shared/schema";
 
 const signupSchema = z.object({
@@ -279,6 +280,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(storage.getAllJobs(tenant(req)));
   });
 
+  // Must sit above /api/jobs/:id or "task-summary" is parsed as an id.
+  app.get("/api/jobs/task-summary", (req, res) => {
+    const summary = storage.getJobTaskSummary(tenant(req), viewerToday(req));
+    res.json(Object.fromEntries(summary));
+  });
+
   app.get("/api/jobs/next-number", (req, res) => {
     res.json({ jobNumber: storage.getNextJobNumber(tenant(req)) });
   });
@@ -386,6 +393,137 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       timestamp: new Date().toISOString(),
     });
 
+    res.status(204).end();
+  });
+
+  // ═══════════════════ TASKS ═══════════════════
+  //
+  // What's owed on each job. Every task hangs off a job by design — "call the
+  // engineer" on its own is a sticky note; "call the engineer about 26350" is
+  // the thing worth keeping.
+
+  /** The viewer's own date, used for overdue/today. Never computed here. */
+  function viewerToday(req: Request): string {
+    const supplied = String(req.query.today ?? "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(supplied)) return supplied;
+    // A client that forgot to send one still gets something sane, but the
+    // server runs UTC so this can be a day ahead of Pennsylvania after 8pm.
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  app.get("/api/tasks", (req, res) => {
+    const view = String(req.query.view ?? "open");
+    if (!["open", "today", "upcoming", "done", "all"].includes(view)) {
+      return res.status(400).json({ message: "Unknown view" });
+    }
+    const rawAssignee = req.query.assignedTo;
+    res.json(
+      storage.getTasks(tenant(req), {
+        view: view as any,
+        today: viewerToday(req),
+        jobId: req.query.jobId ? parseInt(String(req.query.jobId), 10) : undefined,
+        priority: req.query.priority ? (String(req.query.priority) as any) : undefined,
+        assignedTo:
+          rawAssignee === "unassigned"
+            ? "unassigned"
+            : rawAssignee
+              ? parseInt(String(rawAssignee), 10)
+              : undefined,
+      }),
+    );
+  });
+
+  app.get("/api/tasks/:id", (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    // A non-numeric id means the caller built a bad URL. Say so, rather than
+    // returning the 404 that looks like "no such task".
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid task id" });
+    const task = storage.getTask(tenant(req), id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    res.json(task);
+  });
+
+  app.post("/api/tasks", (req, res) => {
+    const result = insertTaskSchema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
+    }
+
+    // jobId and assignedTo both arrive from the client, so both are proved to
+    // belong to this company before anything is written.
+    const job = storage.getJob(tenant(req), result.data.jobId);
+    if (!job) return res.status(400).json({ message: "That job isn't on your board" });
+    if (!assigneeIsValid(req, result.data.assignedTo)) {
+      return res.status(400).json({ message: "That assignee isn't on your team" });
+    }
+
+    const me = actor(req);
+    const task = storage.createTask(tenant(req), result.data, me.id);
+
+    storage.logActivity(tenant(req), {
+      jobId: job.id,
+      jobNumber: job.jobNumber,
+      jobName: job.jobName,
+      employeeId: me.id,
+      action: "task_added",
+      details: `${me.name} added "${task.title}"`,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.status(201).json(task);
+  });
+
+  app.patch("/api/tasks/:id", (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!storage.getTask(tenant(req), id)) return res.status(404).json({ message: "Task not found" });
+
+    const result = insertTaskSchema.partial().safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
+    }
+    if (result.data.jobId && !storage.getJob(tenant(req), result.data.jobId)) {
+      return res.status(400).json({ message: "That job isn't on your board" });
+    }
+    if (!assigneeIsValid(req, result.data.assignedTo)) {
+      return res.status(400).json({ message: "That assignee isn't on your team" });
+    }
+
+    res.json(storage.updateTask(tenant(req), id, result.data));
+  });
+
+  app.post("/api/tasks/:id/complete", (req, res) => {
+    const me = actor(req);
+    const done = storage.completeTask(tenant(req), parseInt(req.params.id, 10), me.id);
+    if (!done) return res.status(404).json({ message: "Task not found" });
+
+    const job = storage.getJob(tenant(req), done.task.jobId);
+    if (job) {
+      storage.logActivity(tenant(req), {
+        jobId: job.id,
+        jobNumber: job.jobNumber,
+        jobName: job.jobName,
+        employeeId: me.id,
+        action: "task_done",
+        details: `${me.name} finished "${done.task.title}"`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // nextOccurrence is non-null when the task repeats — the client uses it to
+    // tell the user the next one has been scheduled rather than silently
+    // re-adding a row they just ticked off.
+    res.json(done);
+  });
+
+  app.post("/api/tasks/:id/reopen", (req, res) => {
+    const task = storage.reopenTask(tenant(req), parseInt(req.params.id, 10));
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    res.json(task);
+  });
+
+  app.delete("/api/tasks/:id", (req, res) => {
+    const removed = storage.deleteTask(tenant(req), parseInt(req.params.id, 10));
+    if (!removed) return res.status(404).json({ message: "Task not found" });
     res.status(204).end();
   });
 
