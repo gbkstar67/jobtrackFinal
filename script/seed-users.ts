@@ -125,21 +125,51 @@ async function main() {
   // happened and the old table is untouched.
   sqlite.transaction(() => {
     sqlite.prepare("DELETE FROM employees WHERE company_id = ?").run(COMPANY_ID);
-    // Reset AUTOINCREMENT so employees added later start above id 4.
-    sqlite.prepare("DELETE FROM sqlite_sequence WHERE name = 'employees'").run();
+    // Deliberately NOT resetting sqlite_sequence. The employees id space is
+    // global across tenants now, so clearing the high-water mark would hand
+    // this company ids that another company's rows already reference.
 
     const insert = sqlite.prepare(
       `INSERT INTO employees (id, company_id, name, role, phone, email, color, active, created_at, username, password_hash)
        VALUES (?, ?, ?, ?, NULL, NULL, ?, 1, ?, ?, ?)`,
     );
 
+    // Ids are pinned ONLY for company 1, where they preserve HL Thomas's
+    // existing created_by / assigned_to / employee_id references. The id space
+    // is global across tenants, so pinning them anywhere else would collide
+    // with rows another company already owns.
+    const pinIds = COMPANY_ID === 1;
+    const insertAuto = sqlite.prepare(
+      `INSERT INTO employees (company_id, name, role, phone, email, color, active, created_at, username, password_hash)
+       VALUES (?, ?, ?, NULL, NULL, ?, 1, ?, ?, ?)`,
+    );
+
     for (const account of ACCOUNTS) {
       const { hash } = hashes.find((h) => h.id === account.id)!;
-      insert.run(account.id, COMPANY_ID, account.name, account.role, account.color, createdAt, account.username, hash);
+      if (pinIds) {
+        insert.run(account.id, COMPANY_ID, account.name, account.role, account.color, createdAt, account.username, hash);
+      } else {
+        insertAuto.run(COMPANY_ID, account.name, account.role, account.color, createdAt, account.username, hash);
+      }
     }
 
-    // Existing sessions reference the old rows; force everyone to sign in again.
-    sqlite.prepare("DELETE FROM sessions").run();
+    // Existing sessions reference the deleted rows, so they must go — but only
+    // this company's. Clearing the whole table would sign out every other
+    // contractor on the box.
+    const ids = sqlite
+      .prepare("SELECT id FROM employees WHERE company_id = ?")
+      .all(COMPANY_ID) as Array<{ id: number }>;
+    const owned = new Set(ids.map((r) => r.id));
+    for (const row of sqlite.prepare("SELECT sid, data FROM sessions").all() as Array<{ sid: string; data: string }>) {
+      try {
+        const user = JSON.parse(row.data)?.passport?.user;
+        if (typeof user === "number" && owned.has(user)) {
+          sqlite.prepare("DELETE FROM sessions WHERE sid = ?").run(row.sid);
+        }
+      } catch {
+        /* unparseable session row — leave it for the reaper */
+      }
+    }
   })();
 
   console.log("\nDone. Four accounts seeded:");

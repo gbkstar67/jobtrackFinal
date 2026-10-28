@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -8,6 +9,8 @@ import { storage } from "./storage";
 import {
   isAuthenticated,
   loginThrottle,
+  signupThrottle,
+  recordSignupAttempt,
   recordFailedLogin,
   clearLoginAttempts,
   hashPassword,
@@ -27,6 +30,31 @@ const signupSchema = z.object({
   firstJobNumber: z.number().int().positive().optional(),
 });
 
+/**
+ * Operator-only gate for the whole-database backup.
+ *
+ * This is NOT a role check, deliberately. The file it guards is a VACUUM INTO
+ * of the entire multi-tenant database: every contractor's client list, every
+ * tenant's scrypt hashes, and every live session id. A tenant owner must not
+ * be able to take other tenants' data either, so no in-app role is sufficient.
+ *
+ * Gated on an out-of-band ADMIN_TOKEN. With no token configured the route does
+ * not exist at all — a deployment that forgot to set one must not fall back to
+ * "any signed-in user", which is exactly the hole this replaces.
+ */
+function requireOperator(req: Request, res: Response, next: NextFunction) {
+  const expected = process.env.ADMIN_TOKEN;
+  if (!expected) return res.status(404).json({ message: "Not found" });
+
+  const supplied = String(req.headers["x-admin-token"] ?? "");
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(404).json({ message: "Not found" });
+  }
+  next();
+}
+
 /** The signed-in employee. Safe to assert past the isAuthenticated gate. */
 const actor = (req: Request) => req.user as Employee;
 
@@ -42,6 +70,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ═══════════════════ AUTH (the only unauthenticated routes) ═══════════════════
 
   app.post("/api/login", loginThrottle, (req, res, next) => {
+    // passport-local falls back to req.query for username and password, which
+    // would put credentials in the URL and therefore in proxy and platform
+    // access logs. Only the body is a legitimate source.
+    if (req.query.username || req.query.password) {
+      return res.status(400).json({ message: "Send credentials in the request body." });
+    }
     passport.authenticate("local", (err: unknown, user: Employee | false, info?: { message?: string }) => {
       if (err) return next(err);
 
@@ -99,7 +133,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     return candidate;
   }
 
-  app.post("/api/signup", loginThrottle, async (req, res, next) => {
+  app.post("/api/signup", signupThrottle, async (req, res, next) => {
     const body = signupSchema.safeParse(req.body);
     if (!body.success) {
       return res.status(400).json({ message: "Check the form", errors: body.error.flatten() });
@@ -107,6 +141,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
     const { companyName, name, email, password, firstJobNumber } = body.data;
     const loginEmail = email.trim().toLowerCase();
+
+    // Every signup counts against the bucket, successful or not. loginThrottle
+    // only ever rose on a FAILED login, and signup never reported failures — so
+    // the counter it read could never increase and the gate never closed.
+    recordSignupAttempt(req);
 
     if (storage.getEmployeeByLogin(loginEmail)) {
       return res.status(409).json({ message: "That email is already registered." });
@@ -183,9 +222,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Employees and users are now the same table, so deleting the wrong row
     // here destroys someone's login. Crew records stay deletable; accounts have
     // to be removed with the seed script, deliberately.
-    if (emp.username) {
+    // Tests BOTH identifiers. It used to check username only, which was written
+    // when every login came from the seed script. Owners created by signup have
+    // a loginEmail and no username, so their company's sole login could delete
+    // itself and lock the tenant out of its own data permanently.
+    if (emp.username || emp.loginEmail) {
       return res.status(409).json({
-        message: `${emp.name} has a login account and can't be deleted from the team page. Mark them inactive instead.`,
+        message: `${emp.name} has a login and can't be deleted from the team page. Mark them inactive instead.`,
       });
     }
 
@@ -537,9 +580,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // Railway volumes have no file browser and no download, so without this the
   // only copy of the database is unreachable except from inside the container.
   // Hitting this route in a browser downloads a consistent snapshot.
-  app.get("/api/admin/backup", (req, res, next) => {
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
-    const tmp = path.join(os.tmpdir(), `jobdeck-backup-${stamp}.db`);
+  app.get("/api/admin/backup", requireOperator, (req, res, next) => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    // Randomised, not timestamped: VACUUM INTO refuses to overwrite, so two
+    // requests in the same second would collide on a per-second name.
+    const tmp = path.join(os.tmpdir(), `jobdeck-backup-${stamp}-${crypto.randomUUID()}.db`);
 
     try {
       storage.backupTo(tmp);

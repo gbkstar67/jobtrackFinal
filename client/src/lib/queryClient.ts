@@ -12,6 +12,12 @@ export const ME_KEY = ["/api/me"] as const;
  * error toast.
  */
 function handleUnauthorized() {
+  // Clear EVERYTHING, not just the identity. Only wiping ME_KEY left every
+  // other cached entry in place with staleTime: Infinity, so a session that
+  // ended without an explicit Sign out — expiry, a redeploy, someone else
+  // picking up the phone — rendered the previous company's jobs, team and
+  // client details to whoever signed in next.
+  queryClient.clear();
   queryClient.setQueryData(ME_KEY, null);
 }
 

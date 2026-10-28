@@ -52,11 +52,11 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      // Auth responses carry the signed-in employee; keep them out of the logs.
-      if (capturedJsonResponse && !path.startsWith("/api/login") && path !== "/api/me") {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
+      // Method, path, status and duration only. Response bodies used to be
+      // appended, which wrote every tenant's client names, phone numbers,
+      // emails and site addresses into the platform log — readable by anyone
+      // with access to the deploy console, and retained there.
+      const logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
 
       log(logLine);
     }
@@ -74,9 +74,12 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
 
+    // Log the real error; return a generic one. err.message from the SQLite
+    // driver carries table and column names and container paths.
     console.error("Internal Server Error:", err);
+    const message =
+      status < 500 && typeof err.message === "string" ? err.message : "Internal Server Error";
 
     if (res.headersSent) {
       return next(err);

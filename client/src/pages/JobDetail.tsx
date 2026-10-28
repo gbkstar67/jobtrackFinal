@@ -95,7 +95,7 @@ export default function JobDetail() {
 
   const id = parseInt(params.id, 10);
 
-  const { data: job, isLoading } = useQuery<Job>({
+  const { data: job, isLoading, isError } = useQuery<Job>({
     queryKey: ["/api/jobs", id],
     queryFn: () => apiRequest("GET", `/api/jobs/${id}`).then((r) => r.json()),
   });
@@ -119,7 +119,7 @@ export default function JobDetail() {
           clientEmail: job.clientEmail ?? "",
           clientAddress: job.clientAddress ?? "",
           assignedTo: job.assignedTo ?? null,
-          createdBy: job.createdBy ?? null,
+          // createdBy is not editable: it comes from the session at creation.
           startDate: job.startDate ?? "",
           bidBy: job.bidBy as any,
           billingType: job.billingType as any,
@@ -161,6 +161,25 @@ export default function JobDetail() {
     else if (typeof payload.assignedTo === "string") payload.assignedTo = parseInt(payload.assignedTo, 10);
     updateMutation.mutate(payload);
   };
+
+  // The hash route survives a session ending, so a tab left on #/job/412 would
+  // otherwise render the previous tenant's client record to whoever signs in
+  // next — the cached copy, with no request made. An explicit error branch is
+  // what stops that; the cache clear on 401 is the other half.
+  if (isError || (!isLoading && !job)) {
+    return (
+      <AppShell>
+        <div className="sheet-card p-12 text-center">
+          <p className="text-muted-foreground font-medium">
+            That job isn't on your board.
+          </p>
+          <Button onClick={() => navigate("/")} className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90 font-bold tracking-wide">
+            Back to all jobs
+          </Button>
+        </div>
+      </AppShell>
+    );
+  }
 
   if (isLoading) {
     return (

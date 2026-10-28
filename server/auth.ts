@@ -47,36 +47,90 @@ export async function verifyPassword(password: string, stored: string): Promise<
 // a single process serves every request.
 
 const MAX_ATTEMPTS = 8;
+const MAX_SIGNUPS = 5;
 const WINDOW_MS = 15 * 60_000;
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
-function throttleKey(req: Request) {
-  return `${req.ip ?? "unknown"}:${String(req.body?.username ?? "").toLowerCase()}`;
+// The map is swept on write rather than left to grow. Without this, every
+// distinct key from an unauthenticated caller stays resident forever — a slow
+// memory-exhaustion vector that needs no account at all.
+const MAX_TRACKED = 10_000;
+function sweep(now: number) {
+  if (attempts.size < MAX_TRACKED) return;
+  // Array.from rather than iterating the Map directly: the build targets a
+  // lower lib than Map iteration requires, and it also avoids mutating while
+  // iterating.
+  for (const key of Array.from(attempts.keys())) {
+    const entry = attempts.get(key);
+    if (entry && entry.resetAt <= now) attempts.delete(key);
+  }
 }
 
-export function loginThrottle(req: Request, res: Response, next: NextFunction) {
-  const key = throttleKey(req);
+/**
+ * The bucket key.
+ *
+ * The identifier is trimmed as well as lowercased, because the account lookup
+ * trims too — without it " grant" and "grant" resolve to the same account but
+ * land in different buckets, so an attacker gets a fresh allowance per padding
+ * variant and the throttle is decorative.
+ */
+function throttleKey(req: Request, scope: string) {
+  // Signup is keyed on the SOURCE ALONE. Including the email would hand an
+  // attacker a fresh allowance for every address they invent, which is exactly
+  // how the previous version failed: the thing being limited is how many
+  // companies one source can create, not how often one address is tried.
+  if (scope === "signup") return `signup:${req.ip ?? "unknown"}`;
+
+  // Login keys on source + account so one person fat-fingering their password
+  // cannot lock out their whole shop behind a shared office IP. Trimmed as
+  // well as lowercased, because the account lookup trims too — otherwise
+  // " grant" and "grant" reach the same account through different buckets.
+  const who = String(req.body?.username ?? "").trim().toLowerCase();
+  return `login:${req.ip ?? "unknown"}:${who}`;
+}
+
+function gate(req: Request, res: Response, next: NextFunction, scope: string, max: number) {
+  const key = throttleKey(req, scope);
   const now = Date.now();
+  sweep(now);
   const entry = attempts.get(key);
 
-  if (entry && entry.resetAt > now && entry.count >= MAX_ATTEMPTS) {
+  if (entry && entry.resetAt > now && entry.count >= max) {
     const minutes = Math.ceil((entry.resetAt - now) / 60_000);
-    return res
-      .status(429)
-      .json({ message: `Too many attempts. Try again in ${minutes} minute(s).` });
+    return res.status(429).json({ message: `Too many attempts. Try again in ${minutes} minute(s).` });
   }
-
   if (!entry || entry.resetAt <= now) attempts.set(key, { count: 0, resetAt: now + WINDOW_MS });
   next();
 }
 
-export function recordFailedLogin(req: Request) {
-  const entry = attempts.get(throttleKey(req));
+export function loginThrottle(req: Request, res: Response, next: NextFunction) {
+  gate(req, res, next, "login", MAX_ATTEMPTS);
+}
+
+/** Signup is unauthenticated and creates rows, so it gets its own tighter bucket. */
+export function signupThrottle(req: Request, res: Response, next: NextFunction) {
+  gate(req, res, next, "signup", MAX_SIGNUPS);
+}
+
+function bump(key: string) {
+  const entry = attempts.get(key);
   if (entry) entry.count += 1;
 }
 
+export function recordFailedLogin(req: Request) {
+  bump(throttleKey(req, "login"));
+}
+
+/**
+ * Counted on EVERY signup, not just failures. A successful signup is the
+ * expensive one — it creates a company and an authenticated session.
+ */
+export function recordSignupAttempt(req: Request) {
+  bump(throttleKey(req, "signup"));
+}
+
 export function clearLoginAttempts(req: Request) {
-  attempts.delete(throttleKey(req));
+  attempts.delete(throttleKey(req, "login"));
 }
 
 // ══════════════════════════ SETUP ══════════════════════════
@@ -138,7 +192,7 @@ export function setupAuth(app: Express) {
     // "username" here is whatever was typed in the sign-in box: either the
     // short username the shop already uses, or an email address. Both are
     // globally unique, so one lookup resolves the person and their company.
-    new LocalStrategy(async (username, password, done) => {
+    new LocalStrategy({ passReqToCallback: false }, async (username, password, done) => {
       try {
         const employee = storage.getEmployeeByLogin(username.trim().toLowerCase());
 

@@ -125,6 +125,10 @@ export const insertJobSchema = createInsertSchema(jobs)
     jobNumber: true,
     createdAt: true,
     companyId: true, // from the session, never the request body
+    // Also from the session. It was writable through PATCH /api/jobs/:id, so a
+    // job could be attributed to any employee id — including one at another
+    // company, since updateJob applies the patch verbatim.
+    createdBy: true,
   })
   .extend({
     bidBy: z.enum(["HT", "DV"]).nullable().optional(),

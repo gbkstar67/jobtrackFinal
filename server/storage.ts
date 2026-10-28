@@ -106,7 +106,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(employees.companyId, companyId))
       .orderBy(employees.name)
       .all();
-    const withAvatars = this.employeeIdsWithAvatars();
+    const withAvatars = this.employeeIdsWithAvatars(companyId);
     return rows.map((e) => ({ ...e, hasAvatar: withAvatars.has(e.id) }));
   }
 
@@ -117,7 +117,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(employees.id, id), eq(employees.companyId, companyId)))
       .get();
     if (!row) return undefined;
-    return { ...row, hasAvatar: this.employeeIdsWithAvatars().has(row.id) };
+    return { ...row, hasAvatar: this.employeeIdsWithAvatars(companyId).has(row.id) };
   }
 
   /**
@@ -198,35 +198,40 @@ export class DatabaseStorage implements IStorage {
   // Raw statements because the picture is a BLOB and must not ride along on an
   // ordinary employee query. Each one re-checks the tenant through getEmployee
   // rather than trusting the id.
-  private employeeIdsWithAvatars(): Set<number> {
+  private employeeIdsWithAvatars(companyId: number): Set<number> {
     const rows = sqlite
-      .prepare("SELECT employee_id AS id FROM employee_avatars")
-      .all() as Array<{ id: number }>;
+      .prepare("SELECT employee_id AS id FROM employee_avatars WHERE company_id = ?")
+      .all(companyId) as Array<{ id: number }>;
     return new Set(rows.map((r) => r.id));
   }
 
   getAvatar(companyId: number, employeeId: number) {
     if (!this.getEmployee(companyId, employeeId)) return undefined;
     return sqlite
-      .prepare("SELECT mime, bytes, updated_at AS updatedAt FROM employee_avatars WHERE employee_id = ?")
-      .get(employeeId) as { mime: string; bytes: Buffer; updatedAt: string } | undefined;
+      .prepare(
+        "SELECT mime, bytes, updated_at AS updatedAt FROM employee_avatars WHERE employee_id = ? AND company_id = ?",
+      )
+      .get(employeeId, companyId) as { mime: string; bytes: Buffer; updatedAt: string } | undefined;
   }
 
   setAvatar(companyId: number, employeeId: number, mime: string, bytes: Buffer): void {
     if (!this.getEmployee(companyId, employeeId)) return;
     sqlite
       .prepare(
-        `INSERT INTO employee_avatars (employee_id, mime, bytes, updated_at)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO employee_avatars (employee_id, company_id, mime, bytes, updated_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(employee_id) DO UPDATE SET
-           mime = excluded.mime, bytes = excluded.bytes, updated_at = excluded.updated_at`,
+           mime = excluded.mime, bytes = excluded.bytes, updated_at = excluded.updated_at
+         WHERE employee_avatars.company_id = excluded.company_id`,
       )
-      .run(employeeId, mime, bytes, new Date().toISOString());
+      .run(employeeId, companyId, mime, bytes, new Date().toISOString());
   }
 
   deleteAvatar(companyId: number, employeeId: number): boolean {
     if (!this.getEmployee(companyId, employeeId)) return false;
-    return sqlite.prepare("DELETE FROM employee_avatars WHERE employee_id = ?").run(employeeId).changes > 0;
+    return sqlite
+      .prepare("DELETE FROM employee_avatars WHERE employee_id = ? AND company_id = ?")
+      .run(employeeId, companyId).changes > 0;
   }
 
   // ── Jobs ──

@@ -303,6 +303,23 @@ const MIGRATIONS: Array<(d: Database.Database) => void> = [
       CREATE INDEX IF NOT EXISTS tasks_reminders ON tasks (remind_at) WHERE remind_at IS NOT NULL AND reminder_sent_at IS NULL;
     `);
   },
+
+  // ── 8: avatars carry their tenant ──
+  // employee_avatars was keyed on employee_id alone, so every avatar query was
+  // authorised by the id rather than by the row. The listing query in
+  // particular had no tenant filter at all and reported which ids across EVERY
+  // company have a picture. Backfilled from the owning employee.
+  (d) => {
+    addColumn(d, "employee_avatars", "company_id", "INTEGER NOT NULL DEFAULT 1");
+    d.exec(`
+      UPDATE employee_avatars
+         SET company_id = COALESCE(
+           (SELECT e.company_id FROM employees e WHERE e.id = employee_avatars.employee_id),
+           company_id
+         );
+      CREATE INDEX IF NOT EXISTS employee_avatars_company ON employee_avatars (company_id);
+    `);
+  },
 ];
 
 function runMigrations(d: Database.Database) {

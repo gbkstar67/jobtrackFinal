@@ -130,6 +130,10 @@ async function main() {
       wipe = answer.toLowerCase() === "yes";
       if (!wipe) console.log("Keeping existing jobs. Sheet numbers already present will be skipped.");
     }
+    // Re-derive from the answer, not the flag: declining the job wipe must
+    // also drop a --wipe-activity passed on the command line, or saying "no"
+    // still clears the log.
+    wipeActivity = wipeActivity && wipe;
     if (wipe && existingActivity > 0) {
       const answer = await prompt(
         `Also clear the ${existingActivity} old activity row(s)? They refer to the jobs being deleted. (yes/no): `,
