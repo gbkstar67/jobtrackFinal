@@ -390,6 +390,14 @@ export class DatabaseStorage implements IStorage {
     const existing = this.getTask(companyId, id);
     if (!existing) return undefined;
 
+    // Completing an already-complete task is a no-op, which makes this
+    // endpoint genuinely idempotent. Without the guard, a double-tap on the
+    // checkbox — or any retry — re-stamps the row AND inserts another next
+    // occurrence for a repeating task. Two identical "Monday coordination
+    // meeting" rows on the same job, each spawning its own next occurrence,
+    // with nothing to tell them apart or dedupe them on.
+    if (existing.completedAt) return { task: existing, nextOccurrence: null };
+
     return db.transaction((tx) => {
       const task = tx
         .update(tasks)
