@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCurrentUser } from "@/App";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,10 @@ function getInitials(name: string) {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const currentUser = useCurrentUser();
+  const { data: company } = useQuery<{ name: string } | null>({
+    queryKey: ["/api/company"],
+    enabled: Boolean(currentUser),
+  });
 
   const logout = useMutation({
     mutationFn: () => apiRequest("POST", "/api/logout"),
@@ -51,7 +55,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <Wordmark className="text-xl" />
                 <span className="flex items-center gap-2">
                   <FadeBar className="h-[9px] w-[46px]" />
-                  <CompanyLine className="text-[9px]" />
+                  <CompanyLine className="text-[9px]" companyName={company?.name} />
                 </span>
               </span>
             </Link>
@@ -115,7 +119,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 pb-8 pt-2 flex items-center gap-3">
         <FadeBar className="h-[10px] w-[52px]" color="hsl(var(--border))" />
-        <CompanyLine className="text-[10px]" />
+        <CompanyLine className="text-[10px]" companyName={company?.name} />
       </footer>
     </div>
   );

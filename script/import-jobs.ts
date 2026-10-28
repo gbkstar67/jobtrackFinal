@@ -21,6 +21,9 @@
 import readline from "readline";
 import { sqlite } from "../server/db";
 
+/** Which company's board to load. Every statement below is scoped to it. */
+const COMPANY_ID = Number(process.env.COMPANY_ID ?? 1);
+
 /**
  * [job number, job name, customer, bid by, billing type] — straight off the
  * sheet, in sheet order.
@@ -107,8 +110,12 @@ async function main() {
   console.log(`\nImporting into: ${process.env.DATABASE_PATH || "./data.db"}`);
   console.log(`Jobs on the sheet: ${JOBS.length}\n`);
 
-  const existingJobs = (sqlite.prepare("SELECT COUNT(*) AS n FROM jobs").get() as { n: number }).n;
-  const existingActivity = (sqlite.prepare("SELECT COUNT(*) AS n FROM activity_log").get() as { n: number }).n;
+  const existingJobs = (
+    sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE company_id = ?").get(COMPANY_ID) as { n: number }
+  ).n;
+  const existingActivity = (
+    sqlite.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE company_id = ?").get(COMPANY_ID) as { n: number }
+  ).n;
 
   console.log(`Currently on the board: ${existingJobs} job(s), ${existingActivity} activity row(s).`);
 
@@ -141,26 +148,26 @@ async function main() {
 
   // One transaction: either the whole board ends up correct, or nothing changed.
   sqlite.transaction(() => {
-    if (wipe) sqlite.prepare("DELETE FROM jobs").run();
-    if (wipeActivity) sqlite.prepare("DELETE FROM activity_log").run();
+    if (wipe) sqlite.prepare("DELETE FROM jobs WHERE company_id = ?").run(COMPANY_ID);
+    if (wipeActivity) sqlite.prepare("DELETE FROM activity_log WHERE company_id = ?").run(COMPANY_ID);
 
     const currentRow = sqlite.prepare(
-      "SELECT id, job_name, client_name, bid_by, billing_type FROM jobs WHERE job_number = ?",
+      "SELECT id, job_name, client_name, bid_by, billing_type FROM jobs WHERE company_id = ? AND job_number = ?",
     );
     const updateJob = sqlite.prepare(
       "UPDATE jobs SET job_name = ?, client_name = ?, bid_by = ?, billing_type = ? WHERE id = ?",
     );
     const insertJob = sqlite.prepare(
-      `INSERT INTO jobs (job_number, job_name, client_name, bid_by, billing_type, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO jobs (company_id, job_number, job_name, client_name, bid_by, billing_type, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertActivity = sqlite.prepare(
-      `INSERT INTO activity_log (job_id, job_number, job_name, employee_id, action, details, timestamp)
-       VALUES (?, ?, ?, ?, 'created', ?, ?)`,
+      `INSERT INTO activity_log (company_id, job_id, job_number, job_name, employee_id, action, details, timestamp)
+       VALUES (?, ?, ?, ?, ?, 'created', ?, ?)`,
     );
 
     for (const [jobNumber, jobName, clientName, bidBy, billingType] of JOBS) {
-      const current = currentRow.get(jobNumber) as
+      const current = currentRow.get(COMPANY_ID, jobNumber) as
         | { id: number; job_name: string; client_name: string; bid_by: string | null; billing_type: string | null }
         | undefined;
 
@@ -182,18 +189,21 @@ async function main() {
         }
         continue;
       }
-      const info = insertJob.run(jobNumber, jobName, clientName, bidBy, billingType, IMPORTED_BY, now);
+      const info = insertJob.run(COMPANY_ID, jobNumber, jobName, clientName, bidBy, billingType, IMPORTED_BY, now);
       insertActivity.run(
-        info.lastInsertRowid as number, jobNumber, jobName, IMPORTED_BY,
+        COMPANY_ID, info.lastInsertRowid as number, jobNumber, jobName, IMPORTED_BY,
         `Grant imported job ${jobNumber} (${jobName})`, now,
       );
       inserted += 1;
     }
   })();
 
-  const total = (sqlite.prepare("SELECT COUNT(*) AS n FROM jobs").get() as { n: number }).n;
+  const total = (
+    sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE company_id = ?").get(COMPANY_ID) as { n: number }
+  ).n;
   const maxNum = (
-    sqlite.prepare("SELECT MAX(CAST(job_number AS INTEGER)) AS m FROM jobs").get() as { m: number | null }
+    sqlite.prepare("SELECT MAX(CAST(job_number AS INTEGER)) AS m FROM jobs WHERE company_id = ?")
+      .get(COMPANY_ID) as { m: number | null }
   ).m;
 
   console.log(`\nImported : ${inserted}`);

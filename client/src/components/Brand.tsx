@@ -5,11 +5,11 @@
  * any size, picks up the theme colours, and adds nothing to load.
  */
 
-/** The circular HLT badge — navy disc, white monogram, blue arc. */
+/** The circular Jobdeck badge — blue disc, white monogram. */
 export function HLTBadge({ className = "w-9 h-9" }: { className?: string }) {
   return (
     <svg
-      aria-label="HL Thomas Inc"
+      aria-label="Jobdeck"
       viewBox="0 0 48 48"
       className={className}
       xmlns="http://www.w3.org/2000/svg"
@@ -26,7 +26,7 @@ export function HLTBadge({ className = "w-9 h-9" }: { className?: string }) {
         fontWeight="800"
         letterSpacing="-0.5"
       >
-        HLT
+        JD
       </text>
     </svg>
   );
@@ -70,14 +70,22 @@ export function Wordmark({ className = "" }: { className?: string }) {
       className={`font-display font-extrabold tracking-tight leading-none select-none ${className}`}
     >
       <span className="text-primary">JOB</span>
-      <span className="text-foreground">TRACK</span>
+      <span className="text-foreground">DECK</span>
     </span>
   );
 }
 
-/** The company line, set wide and small like "VANDERBILT PA". */
-export function CompanyLine({ className = "" }: { className?: string }) {
+/**
+ * The signed-in company's name, set wide and small like "VANDERBILT PA" on the
+ * letterhead. Falls back to the product name before a session exists.
+ */
+export function CompanyLine({
+  className = "",
+  companyName,
+}: { className?: string; companyName?: string | null }) {
   return (
-    <span className={`label-caps ${className}`}>HL Thomas Inc · Vanderbilt PA</span>
+    <span className={`label-caps ${className}`}>
+      {companyName ?? "Job tracking for the trades"}
+    </span>
   );
 }

@@ -111,7 +111,7 @@ export function setupAuth(app: Express) {
 
   app.use(
     session({
-      name: "jobtrack.sid",
+      name: "jobdeck.sid",
       secret: sessionSecret(),
       store: createSessionStore(sqlite),
       resave: false,
@@ -135,9 +135,12 @@ export function setupAuth(app: Express) {
   );
 
   passport.use(
+    // "username" here is whatever was typed in the sign-in box: either the
+    // short username the shop already uses, or an email address. Both are
+    // globally unique, so one lookup resolves the person and their company.
     new LocalStrategy(async (username, password, done) => {
       try {
-        const employee = storage.getEmployeeByUsername(username);
+        const employee = storage.getEmployeeByLogin(username.trim().toLowerCase());
 
         // Always run a hash comparison, even when the username is unknown, so
         // that a wrong username and a wrong password take the same time and
@@ -164,9 +167,12 @@ export function setupAuth(app: Express) {
 
   passport.deserializeUser((id: number, done) => {
     try {
-      const employee = storage.getEmployee(id);
-      // Deleted or deactivated mid-session: drop them rather than erroring.
-      if (!employee || !employee.active) return done(null, false);
+      // The session stores only the employee id, so the company has to be read
+      // back from the row rather than trusted from the session payload.
+      const row = storage.getEmployeeRowById(id);
+      if (!row || !row.active) return done(null, false); // deleted or deactivated mid-session
+      const employee = storage.getEmployee(row.companyId, id);
+      if (!employee) return done(null, false);
       done(null, employee);
     } catch (err) {
       done(err);

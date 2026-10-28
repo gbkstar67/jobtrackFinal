@@ -10,13 +10,32 @@ import {
   loginThrottle,
   recordFailedLogin,
   clearLoginAttempts,
+  hashPassword,
 } from "./auth";
+import { z } from "zod";
 import {
   insertJobSchema, insertEmployeeSchema, MAX_AVATAR_BYTES, type Employee,
 } from "@shared/schema";
 
+const signupSchema = z.object({
+  companyName: z.string().trim().min(2, "Company name is required"),
+  name: z.string().trim().min(2, "Your name is required"),
+  email: z.string().trim().email("Enter a valid email"),
+  password: z.string().min(8, "Use at least 8 characters"),
+  // A shop moving off paper can carry its existing numbering across.
+  firstJobNumber: z.number().int().positive().optional(),
+});
+
 /** The signed-in employee. Safe to assert past the isAuthenticated gate. */
 const actor = (req: Request) => req.user as Employee;
+
+/**
+ * The tenant for this request, taken from the session and nowhere else.
+ *
+ * Never read a company id from a path, query or body: that would let a signed-in
+ * user at one shop ask for another shop's board simply by changing a number.
+ */
+const tenant = (req: Request) => (req.user as Employee).companyId;
 
 export async function registerRoutes(httpServer: Server, app: Express) {
   // ═══════════════════ AUTH (the only unauthenticated routes) ═══════════════════
@@ -49,7 +68,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       if (err) return next(err);
       req.session.destroy((destroyErr) => {
         if (destroyErr) return next(destroyErr);
-        res.clearCookie("jobtrack.sid");
+        res.clearCookie("jobdeck.sid");
         res.status(204).end();
       });
     });
@@ -62,19 +81,80 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(req.user);
   });
 
+  // ═══════════════════ SIGN UP ═══════════════════
+  // Creates a company and its first user in one step. Unauthenticated by
+  // necessity — there is no session yet — so it is throttled like the login.
+
+  function slugify(name: string): string {
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+    return base || "shop";
+  }
+
+  /** First free slug: acme, acme-2, acme-3 … */
+  function uniqueSlug(name: string): string {
+    const base = slugify(name);
+    let candidate = base;
+    for (let n = 2; storage.getCompanyBySlug(candidate); n += 1) candidate = `${base}-${n}`;
+    return candidate;
+  }
+
+  app.post("/api/signup", loginThrottle, async (req, res, next) => {
+    const body = signupSchema.safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ message: "Check the form", errors: body.error.flatten() });
+    }
+
+    const { companyName, name, email, password, firstJobNumber } = body.data;
+    const loginEmail = email.trim().toLowerCase();
+
+    if (storage.getEmployeeByLogin(loginEmail)) {
+      return res.status(409).json({ message: "That email is already registered." });
+    }
+
+    try {
+      const company = storage.createCompany(
+        companyName.trim(),
+        uniqueSlug(companyName),
+        firstJobNumber ?? 1,
+      );
+      const owner = storage.createOwner(company.id, {
+        name: name.trim(),
+        loginEmail,
+        passwordHash: await hashPassword(password),
+      });
+
+      req.session.regenerate((regenErr) => {
+        if (regenErr) return next(regenErr);
+        req.logIn(owner, (loginErr) => {
+          if (loginErr) return next(loginErr);
+          res.status(201).json(owner);
+        });
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ═══════════════════ THE GATE ═══════════════════
   // Mounted on the /api prefix rather than repeated per route, so a route added
   // later is protected by default instead of by whoever remembers. Everything
   // below this line requires a session; everything above it is public.
   app.use("/api", isAuthenticated);
 
+  /** The signed-in user's own company. Used for the name in the header. */
+  app.get("/api/company", (req, res) => {
+    const company = storage.getCompany(tenant(req));
+    if (!company) return res.status(404).json({ message: "Company not found" });
+    res.json({ id: company.id, name: company.name, slug: company.slug });
+  });
+
   // ═══════════════════ EMPLOYEES ═══════════════════
-  app.get("/api/employees", (_req, res) => {
-    res.json(storage.getAllEmployees());
+  app.get("/api/employees", (req, res) => {
+    res.json(storage.getAllEmployees(tenant(req)));
   });
 
   app.get("/api/employees/:id", (req, res) => {
-    const emp = storage.getEmployee(parseInt(req.params.id, 10));
+    const emp = storage.getEmployee(tenant(req), parseInt(req.params.id, 10));
     if (!emp) return res.status(404).json({ message: "Employee not found" });
     res.json(emp);
   });
@@ -82,21 +162,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.post("/api/employees", (req, res) => {
     const result = insertEmployeeSchema.safeParse(req.body);
     if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
-    const emp = storage.createEmployee(result.data);
+    const emp = storage.createEmployee(tenant(req), result.data);
     res.status(201).json(emp);
   });
 
   app.patch("/api/employees/:id", (req, res) => {
     const result = insertEmployeeSchema.partial().safeParse(req.body);
     if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
-    const emp = storage.updateEmployee(parseInt(req.params.id, 10), result.data);
+    const emp = storage.updateEmployee(tenant(req), parseInt(req.params.id, 10), result.data);
     if (!emp) return res.status(404).json({ message: "Employee not found" });
     res.json(emp);
   });
 
   app.delete("/api/employees/:id", (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const emp = storage.getEmployee(id);
+    const emp = storage.getEmployee(tenant(req), id);
     if (!emp) return res.status(404).json({ message: "Employee not found" });
 
     // Employees and users are now the same table, so deleting the wrong row
@@ -108,9 +188,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       });
     }
 
-    storage.deleteEmployee(id);
+    storage.deleteEmployee(tenant(req), id);
     res.status(204).end();
   });
+
+
+  /**
+   * assignedTo arrives in the request body, so it has to be proved to belong to
+   * this company before it is written. Otherwise a signed-in user could park a
+   * job on someone at another contractor simply by guessing an id.
+   */
+  function assigneeIsValid(req: Request, assignedTo: number | null | undefined): boolean {
+    if (assignedTo === undefined || assignedTo === null) return true;
+    return Boolean(storage.getEmployee(tenant(req), assignedTo));
+  }
 
   // ═══════════════════ AVATARS ═══════════════════
   //
@@ -136,7 +227,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   }
 
   app.get("/api/employees/:id/avatar", (req, res) => {
-    const avatar = storage.getAvatar(parseInt(req.params.id, 10));
+    const avatar = storage.getAvatar(tenant(req), parseInt(req.params.id, 10));
     if (!avatar) return res.status(404).json({ message: "No profile picture" });
 
     // Keyed on the upload time so a new picture busts the cache immediately
@@ -152,7 +243,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   app.put("/api/employees/:id/avatar", (req, res) => {
     const id = parseInt(req.params.id, 10);
-    if (!storage.getEmployee(id)) return res.status(404).json({ message: "Employee not found" });
+    if (!storage.getEmployee(tenant(req), id)) return res.status(404).json({ message: "Employee not found" });
 
     const dataUrl = typeof req.body?.dataUrl === "string" ? req.body.dataUrl : "";
     const match = dataUrl.match(/^data:([a-z/+-]+);base64,(.+)$/i);
@@ -173,27 +264,27 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const actualMime = sniff(bytes);
     if (!actualMime) return res.status(415).json({ message: "That file isn't a valid image" });
 
-    storage.setAvatar(id, actualMime, bytes);
+    storage.setAvatar(tenant(req), id, actualMime, bytes);
     res.status(204).end();
   });
 
   app.delete("/api/employees/:id/avatar", (req, res) => {
-    const removed = storage.deleteAvatar(parseInt(req.params.id, 10));
+    const removed = storage.deleteAvatar(tenant(req), parseInt(req.params.id, 10));
     if (!removed) return res.status(404).json({ message: "No profile picture" });
     res.status(204).end();
   });
 
   // ═══════════════════ JOBS ═══════════════════
-  app.get("/api/jobs", (_req, res) => {
-    res.json(storage.getAllJobs());
+  app.get("/api/jobs", (req, res) => {
+    res.json(storage.getAllJobs(tenant(req)));
   });
 
-  app.get("/api/jobs/next-number", (_req, res) => {
-    res.json({ jobNumber: storage.getNextJobNumber() });
+  app.get("/api/jobs/next-number", (req, res) => {
+    res.json({ jobNumber: storage.getNextJobNumber(tenant(req)) });
   });
 
   app.get("/api/jobs/:id", (req, res) => {
-    const job = storage.getJob(parseInt(req.params.id, 10));
+    const job = storage.getJob(tenant(req), parseInt(req.params.id, 10));
     if (!job) return res.status(404).json({ message: "Job not found" });
     res.json(job);
   });
@@ -206,10 +297,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // used to send it, which meant anyone could file a job under anyone's name —
     // and, because the who-am-I picker was React state that reset on refresh, it
     // was usually just null, giving "Someone created job X".
-    const me = actor(req);
-    const job = storage.createJob({ ...result.data, createdBy: me.id });
+    if (!assigneeIsValid(req, result.data.assignedTo)) {
+      return res.status(400).json({ message: "That assignee isn't on your team" });
+    }
 
-    storage.logActivity({
+    const me = actor(req);
+    const job = storage.createJob(tenant(req), result.data, me.id);
+
+    storage.logActivity(tenant(req), {
       jobId: job.id,
       jobNumber: job.jobNumber,
       jobName: job.jobName,
@@ -224,21 +319,25 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   app.patch("/api/jobs/:id", (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const oldJob = storage.getJob(id);
+    const oldJob = storage.getJob(tenant(req), id);
     if (!oldJob) return res.status(404).json({ message: "Job not found" });
 
     const result = insertJobSchema.partial().safeParse(req.body);
     if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
 
-    const updatedJob = storage.updateJob(id, result.data);
+    if (!assigneeIsValid(req, result.data.assignedTo)) {
+      return res.status(400).json({ message: "That assignee isn't on your team" });
+    }
+
+    const updatedJob = storage.updateJob(tenant(req), id, result.data);
     if (!updatedJob) return res.status(404).json({ message: "Job not found" });
 
     // Was `req.body._changedBy` — any caller could attribute an edit to anyone.
     const me = actor(req);
 
     if (result.data.assignedTo !== undefined && result.data.assignedTo !== oldJob.assignedTo) {
-      const assignee = result.data.assignedTo ? storage.getEmployee(result.data.assignedTo) : null;
-      storage.logActivity({
+      const assignee = result.data.assignedTo ? storage.getEmployee(tenant(req), result.data.assignedTo) : null;
+      storage.logActivity(tenant(req), {
         jobId: id,
         jobNumber: oldJob.jobNumber,
         jobName: oldJob.jobName,
@@ -252,7 +351,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const skipKeys = ["assignedTo"];
     const otherChanges = Object.keys(result.data).filter((k) => !skipKeys.includes(k));
     if (otherChanges.length > 0) {
-      storage.logActivity({
+      storage.logActivity(tenant(req), {
         jobId: id,
         jobNumber: updatedJob.jobNumber,
         jobName: updatedJob.jobName,
@@ -268,16 +367,16 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   app.delete("/api/jobs/:id", (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const job = storage.getJob(id);
+    const job = storage.getJob(tenant(req), id);
     if (!job) return res.status(404).json({ message: "Job not found" });
 
     const me = actor(req);
-    storage.deleteJob(id);
+    storage.deleteJob(tenant(req), id);
 
     // Logged before the row is gone so the trail keeps the job number and name.
     // Note there is deliberately no ON DELETE CASCADE on activity_log: cascading
     // would delete exactly the history this record exists to preserve.
-    storage.logActivity({
+    storage.logActivity(tenant(req), {
       jobId: job.id,
       jobNumber: job.jobNumber,
       jobName: job.jobName,
@@ -293,7 +392,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ═══════════════════ ACTIVITY LOG ═══════════════════
   app.get("/api/activity", (req, res) => {
     const jobId = req.query.jobId ? parseInt(req.query.jobId as string, 10) : undefined;
-    res.json(storage.getActivities(jobId));
+    res.json(storage.getActivities(tenant(req), jobId));
   });
 
   // ═══════════════════ BACKUP ═══════════════════
@@ -302,7 +401,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // Hitting this route in a browser downloads a consistent snapshot.
   app.get("/api/admin/backup", (req, res, next) => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
-    const tmp = path.join(os.tmpdir(), `jobtrack-backup-${stamp}.db`);
+    const tmp = path.join(os.tmpdir(), `jobdeck-backup-${stamp}.db`);
 
     try {
       storage.backupTo(tmp);
@@ -310,7 +409,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       return next(err);
     }
 
-    res.download(tmp, `jobtrack-${stamp}.db`, (err) => {
+    res.download(tmp, `jobdeck-${stamp}.db`, (err) => {
       fs.unlink(tmp, () => {});
       if (err && !res.headersSent) next(err);
     });

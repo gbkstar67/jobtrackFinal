@@ -174,6 +174,104 @@ const MIGRATIONS: Array<(d: Database.Database) => void> = [
       );
     `);
   },
+
+  // ── 6: multi-tenancy ──
+  // Jobdeck stops being one shop's tool and becomes a product several
+  // contractors use, each seeing only their own board.
+  //
+  // Everything that holds customer data gains company_id. Existing rows all
+  // belong to company 1, HL Thomas, which keeps its job numbers running on
+  // from the paper log.
+  //
+  // The jobs table has to be rebuilt rather than altered: job_number was
+  // declared UNIQUE at creation, which is a table-level constraint SQLite
+  // cannot drop in place. Two shops must be able to run a job 1042, so
+  // uniqueness moves to (company_id, job_number).
+  (d) => {
+    const now = new Date().toISOString();
+
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        job_number_seed INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+    `);
+
+    // Company 1 is whoever is already in here. Seeded above the highest job
+    // number present so the sequence carries on rather than restarting.
+    const existing = d.prepare("SELECT COUNT(*) AS n FROM companies").get() as { n: number };
+    if (existing.n === 0) {
+      const maxJob = (
+        d.prepare("SELECT MAX(CAST(job_number AS INTEGER)) AS m FROM jobs").get() as { m: number | null }
+      ).m;
+      d.prepare(
+        "INSERT INTO companies (id, name, slug, job_number_seed, created_at) VALUES (1, ?, ?, ?, ?)",
+      ).run("HL Thomas Inc", "hl-thomas", (maxJob ?? 0) + 1, now);
+    }
+
+    addColumn(d, "employees", "company_id", "INTEGER NOT NULL DEFAULT 1");
+    addColumn(d, "employees", "login_email", "TEXT");
+    addColumn(d, "activity_log", "company_id", "INTEGER NOT NULL DEFAULT 1");
+
+    d.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS employees_login_email_unique
+        ON employees (login_email) WHERE login_email IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS employees_company ON employees (company_id);
+      CREATE INDEX IF NOT EXISTS activity_company ON activity_log (company_id);
+    `);
+
+    // ── Rebuild jobs ──
+    const jobColumns = (d.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>)
+      .map((c) => c.name);
+    if (!jobColumns.includes("company_id")) {
+      d.exec(`
+        CREATE TABLE jobs_rebuild (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company_id INTEGER NOT NULL DEFAULT 1,
+          job_number TEXT NOT NULL,
+          job_name TEXT NOT NULL,
+          client_name TEXT NOT NULL,
+          client_phone TEXT,
+          client_email TEXT,
+          client_address TEXT,
+          assigned_to INTEGER,
+          created_by INTEGER,
+          start_date TEXT,
+          bid_by TEXT,
+          billing_type TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        INSERT INTO jobs_rebuild
+          (id, company_id, job_number, job_name, client_name, client_phone, client_email,
+           client_address, assigned_to, created_by, start_date, bid_by, billing_type, notes, created_at)
+        SELECT
+           id, 1, job_number, job_name, client_name, client_phone, client_email,
+           client_address, assigned_to, created_by, start_date, bid_by, billing_type, notes, created_at
+        FROM jobs;
+
+        DROP TABLE jobs;
+        ALTER TABLE jobs_rebuild RENAME TO jobs;
+
+        CREATE UNIQUE INDEX jobs_company_number_unique ON jobs (company_id, job_number);
+        CREATE INDEX jobs_company ON jobs (company_id);
+      `);
+
+      // Make sure the AUTOINCREMENT high-water mark survived the drop/rename,
+      // or the next insert could reuse an id. sqlite_sequence is an internal
+      // table with no declared unique constraint, so it takes an update-then-
+      // insert rather than an upsert.
+      const maxId = (d.prepare("SELECT MAX(id) AS m FROM jobs").get() as { m: number | null }).m ?? 0;
+      const bumped = d.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'jobs'").run(maxId);
+      if (bumped.changes === 0) {
+        d.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('jobs', ?)").run(maxId);
+      }
+    }
+  },
 ];
 
 function runMigrations(d: Database.Database) {

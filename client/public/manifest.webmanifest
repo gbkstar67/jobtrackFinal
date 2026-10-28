@@ -1,7 +1,7 @@
 {
-  "name": "JobTrack — HL Thomas Inc",
-  "short_name": "JobTrack",
-  "description": "Job log for HL Thomas Inc, Vanderbilt PA",
+  "name": "Jobdeck — job tracking for the trades",
+  "short_name": "Jobdeck",
+  "description": "The job board for mechanical, electrical and plumbing contractors.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

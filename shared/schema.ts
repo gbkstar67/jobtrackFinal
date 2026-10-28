@@ -1,10 +1,34 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+// ── Companies (tenants) ──
+// Every row that holds customer data carries a companyId, and every read is
+// scoped by it. One contractor's board must never be reachable from another's
+// session — see the storage layer, where companyId is a required argument on
+// every method rather than an optional filter.
+export const companies = sqliteTable("companies", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  // Where this shop's job numbers start. HL Thomas carries on from its paper
+  // log at 26486; a new shop starts at 1 unless it says otherwise.
+  jobNumberSeed: integer("job_number_seed").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+});
+
+export type Company = typeof companies.$inferSelect;
+
+export const insertCompanySchema = createInsertSchema(companies).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
 
 // ── Employees ──
 export const employees = sqliteTable("employees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
   name: text("name").notNull(),
   role: text("role"),              // e.g. "Foreman", "Laborer", "Electrician"
   phone: text("phone"),
@@ -18,7 +42,10 @@ export const employees = sqliteTable("employees", {
   // rather than a separate users table. Both columns are null for employees who
   // are crew-only and never sign in. Seeded by script/seed-users.ts; there is no
   // self-service signup, so neither column is writable through the API.
+  // Either identifier signs you in. Both are globally unique, so a session
+  // resolves to exactly one person at one company with no company picker.
   username: text("username"),
+  loginEmail: text("login_email"),
   passwordHash: text("password_hash"),
 });
 
@@ -28,7 +55,11 @@ export const insertEmployeeSchema = createInsertSchema(employees).omit({
   id: true,
   createdAt: true,
   username: true,
+  loginEmail: true,
   passwordHash: true,
+  // Never client-supplied: it comes from the session, or a tenant could be
+  // chosen by whoever is calling.
+  companyId: true,
 });
 
 // What the API is allowed to send to the browser. Employee rows now carry a
@@ -44,6 +75,8 @@ export const employeePublicColumns = {
   active: employees.active,
   createdAt: employees.createdAt,
   username: employees.username,
+  loginEmail: employees.loginEmail,
+  companyId: employees.companyId,
 } as const;
 
 export type InsertEmployee = z.infer<typeof insertEmployeeSchema>;
@@ -62,7 +95,9 @@ export type Employee = Omit<EmployeeRow, "passwordHash"> & { hasAvatar?: boolean
 // ── Jobs ──
 export const jobs = sqliteTable("jobs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  jobNumber: text("job_number").notNull().unique(),
+  companyId: integer("company_id").notNull(),
+  // Unique per company, not globally — two shops can both run a job 1042.
+  jobNumber: text("job_number").notNull(),
   jobName: text("job_name").notNull(),
   clientName: text("client_name").notNull(),
   clientPhone: text("client_phone"),
@@ -89,6 +124,7 @@ export const insertJobSchema = createInsertSchema(jobs)
     id: true,
     jobNumber: true,
     createdAt: true,
+    companyId: true, // from the session, never the request body
   })
   .extend({
     bidBy: z.enum(["HT", "DV"]).nullable().optional(),
@@ -116,6 +152,7 @@ export type Job = typeof jobs.$inferSelect;
 // ── Activity Log ──
 export const activityLog = sqliteTable("activity_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
   jobId: integer("job_id").notNull(),
 
   // The job's identity is copied in at write time rather than joined at read
@@ -135,6 +172,7 @@ export const activityLog = sqliteTable("activity_log", {
 
 export const insertActivitySchema = createInsertSchema(activityLog).omit({
   id: true,
+  companyId: true,
 });
 
 export type InsertActivity = z.infer<typeof insertActivitySchema>;

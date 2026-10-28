@@ -19,6 +19,12 @@ import { Writable } from "stream";
 import { sqlite } from "../server/db";
 import { hashPassword } from "../server/auth";
 
+/**
+ * Which company these four belong to. Every statement below is scoped to it —
+ * an unscoped DELETE would wipe every contractor on the box, not just this one.
+ */
+const COMPANY_ID = Number(process.env.COMPANY_ID ?? 1);
+
 // id is pinned deliberately. The live jobs table already has created_by and
 // assigned_to values, and activity_log has employee_id values, all pointing at
 // existing employee ids. Letting AUTOINCREMENT hand out fresh ids would orphan
@@ -57,12 +63,13 @@ function prompt(question: string, hidden = false): Promise<string> {
 }
 
 async function main() {
-  console.log(`\nSeeding accounts into: ${process.env.DATABASE_PATH || "./data.db"}\n`);
+  console.log(`\nSeeding accounts into: ${process.env.DATABASE_PATH || "./data.db"}`);
+  console.log(`Company: ${COMPANY_ID}\n`);
 
   // Report what's about to be displaced, before displacing it.
   const existing = sqlite
-    .prepare("SELECT id, name, username FROM employees ORDER BY id")
-    .all() as Array<{ id: number; name: string; username: string | null }>;
+    .prepare("SELECT id, name, username FROM employees WHERE company_id = ? ORDER BY id")
+    .all(COMPANY_ID) as Array<{ id: number; name: string; username: string | null }>;
 
   if (existing.length > 0) {
     console.log("Employees currently in the database:");
@@ -117,18 +124,18 @@ async function main() {
   // One transaction: either all four accounts exist afterwards, or none of this
   // happened and the old table is untouched.
   sqlite.transaction(() => {
-    sqlite.prepare("DELETE FROM employees").run();
+    sqlite.prepare("DELETE FROM employees WHERE company_id = ?").run(COMPANY_ID);
     // Reset AUTOINCREMENT so employees added later start above id 4.
     sqlite.prepare("DELETE FROM sqlite_sequence WHERE name = 'employees'").run();
 
     const insert = sqlite.prepare(
-      `INSERT INTO employees (id, name, role, phone, email, color, active, created_at, username, password_hash)
-       VALUES (?, ?, ?, NULL, NULL, ?, 1, ?, ?, ?)`,
+      `INSERT INTO employees (id, company_id, name, role, phone, email, color, active, created_at, username, password_hash)
+       VALUES (?, ?, ?, ?, NULL, NULL, ?, 1, ?, ?, ?)`,
     );
 
     for (const account of ACCOUNTS) {
       const { hash } = hashes.find((h) => h.id === account.id)!;
-      insert.run(account.id, account.name, account.role, account.color, createdAt, account.username, hash);
+      insert.run(account.id, COMPANY_ID, account.name, account.role, account.color, createdAt, account.username, hash);
     }
 
     // Existing sessions reference the old rows; force everyone to sign in again.

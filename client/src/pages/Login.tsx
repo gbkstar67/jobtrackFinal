@@ -8,7 +8,7 @@ import { LoaderCircleIcon } from "lucide-react";
 import { HLTBadge, FadeBar, Wordmark, CompanyLine } from "@/components/Brand";
 
 /** Whose phone this is. Not a credential — just saves retyping it. */
-const LAST_USER_KEY = "jobtrack.lastUsername";
+const LAST_USER_KEY = "jobdeck.lastUsername";
 
 export default function Login() {
   const [username, setUsername] = useState(() => {
