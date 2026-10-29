@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboardIcon,
   ClipboardCheckIcon,
+  CalendarDaysIcon,
+  SettingsIcon,
   UsersIcon,
   ActivityIcon,
   LogOutIcon,
@@ -40,14 +42,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const navItems = [
     { href: "/", label: "Jobs", icon: LayoutDashboardIcon },
     { href: "/tasks", label: "Tasks", icon: ClipboardCheckIcon },
+    { href: "/calendar", label: "Calendar", icon: CalendarDaysIcon },
     { href: "/team", label: "Team", icon: UsersIcon },
     { href: "/activity", label: "Activity", icon: ActivityIcon },
   ];
 
   return (
-    <div className="min-h-screen text-foreground">
+    <div className="min-h-screen text-foreground" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
       {/* Header */}
-      <header className="rule-blue bg-card/95 backdrop-blur-sm sticky top-0 z-10 shadow-sm">
+      <header
+        className="rule-blue bg-card/95 backdrop-blur-sm sticky top-0 z-10 shadow-sm"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
           {/* Logo + Nav */}
           <div className="flex items-center gap-6">
@@ -99,6 +105,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             )}
+            <Link href="/settings">
+              <span
+                data-testid="link-settings"
+                title="Settings"
+                className="p-2 rounded-md text-muted-foreground hover:text-primary hover:bg-accent cursor-pointer inline-flex"
+              >
+                <SettingsIcon className="w-4 h-4" />
+              </span>
+            </Link>
             <Button
               data-testid="button-logout"
               variant="ghost"

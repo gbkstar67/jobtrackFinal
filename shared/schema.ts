@@ -14,6 +14,11 @@ export const companies = sqliteTable("companies", {
   // Where this shop's job numbers start. HL Thomas carries on from its paper
   // log at 26486; a new shop starts at 1 unless it says otherwise.
   jobNumberSeed: integer("job_number_seed").notNull().default(1),
+  // Ownership is a column, not a role string: role is a free-text display
+  // label any login holder can set on themselves, so authorising on it would
+  // let a crew member promote themselves.
+  ownerEmployeeId: integer("owner_employee_id"),
+  timezone: text("timezone").notNull().default("America/New_York"),
   createdAt: text("created_at").notNull(),
 });
 
@@ -192,6 +197,15 @@ export const tasks = sqliteTable("tasks", {
 });
 
 export const TASK_PRIORITY = { normal: "Normal", urgent: "Urgent" } as const;
+
+/** Reminder lead times offered in the UI, as minutes before the due moment. */
+export const REMINDER_LEADS = {
+  0: "At the time",
+  30: "30 minutes before",
+  120: "2 hours before",
+  1080: "The evening before",
+  1440: "1 day before",
+} as const;
 export const REPEAT_RULES = {
   daily: "Every day",
   weekly: "Every week",
@@ -221,6 +235,99 @@ export const insertTaskSchema = createInsertSchema(tasks)
 
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type Task = typeof tasks.$inferSelect;
+
+// ── Invites / password resets ──
+// Single-use tokens. Only the hash is stored, so a database copy cannot be
+// replayed into a login.
+export const invites = sqliteTable("invites", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
+  employeeId: integer("employee_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  purpose: text("purpose").notNull().default("invite"),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdBy: integer("created_by"),
+  createdAt: text("created_at").notNull(),
+});
+export type Invite = typeof invites.$inferSelect;
+
+// ── Bearer tokens for the native shell ──
+export const apiTokens = sqliteTable("api_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
+  employeeId: integer("employee_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  platform: text("platform"),
+  lastUsedAt: text("last_used_at"),
+  expiresAt: text("expires_at").notNull(),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull(),
+});
+
+// ── Push targets ──
+export const pushDevices = sqliteTable("push_devices", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
+  employeeId: integer("employee_id").notNull(),
+  transport: text("transport").notNull(),   // "web" | "apns" | "fcm"
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh"),
+  auth: text("auth"),
+  failureCount: integer("failure_count").notNull().default(0),
+  lastSeenAt: text("last_seen_at"),
+  createdAt: text("created_at").notNull(),
+});
+export type PushDevice = typeof pushDevices.$inferSelect;
+
+// ── Job photos, contacts, notes ──
+export const jobPhotos = sqliteTable("job_photos", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
+  jobId: integer("job_id").notNull(),
+  mime: text("mime").notNull(),
+  caption: text("caption"),
+  takenBy: integer("taken_by"),
+  createdAt: text("created_at").notNull(),
+});
+/** Photo metadata only — the BLOBs are never selected by a list query. */
+export type JobPhoto = typeof jobPhotos.$inferSelect;
+
+export const jobContacts = sqliteTable("job_contacts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
+  jobId: integer("job_id").notNull(),
+  name: text("name").notNull(),
+  role: text("role"),
+  phone: text("phone"),
+  email: text("email"),
+  createdAt: text("created_at").notNull(),
+});
+export const insertContactSchema = createInsertSchema(jobContacts)
+  .omit({ id: true, companyId: true, createdAt: true })
+  .extend({ name: z.string().trim().min(1, "Name is required"), jobId: z.number().int().positive() });
+export type JobContact = typeof jobContacts.$inferSelect;
+export type InsertContact = z.infer<typeof insertContactSchema>;
+
+export const jobNotes = sqliteTable("job_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull(),
+  jobId: integer("job_id").notNull(),
+  body: text("body").notNull(),
+  authorId: integer("author_id"),
+  createdAt: text("created_at").notNull(),
+});
+export const insertNoteSchema = createInsertSchema(jobNotes)
+  .omit({ id: true, companyId: true, authorId: true, createdAt: true })
+  .extend({ body: z.string().trim().min(1, "Write something first"), jobId: z.number().int().positive() });
+export type JobNote = typeof jobNotes.$inferSelect;
+export type InsertNote = z.infer<typeof insertNoteSchema>;
+
+/** Largest photo accepted after the browser has resized it. */
+export const MAX_PHOTO_BYTES = 1_200_000;
+export const PHOTO_MAX_EDGE = 1600;
+export const PHOTO_THUMB_EDGE = 320;
+export const MAX_PHOTOS_PER_JOB = 60;
 
 // ── Activity Log ──
 export const activityLog = sqliteTable("activity_log", {

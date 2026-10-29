@@ -18,8 +18,11 @@ import {
 import { z } from "zod";
 import {
   insertJobSchema, insertEmployeeSchema, insertTaskSchema,
-  MAX_AVATAR_BYTES, type Employee,
+  insertContactSchema, insertNoteSchema,
+  MAX_AVATAR_BYTES, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_JOB, type Employee,
 } from "@shared/schema";
+import { pushStatus } from "./push";
+import { mintToken, revokeToken } from "./bearer";
 
 const signupSchema = z.object({
   companyName: z.string().trim().min(2, "Company name is required"),
@@ -92,6 +95,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         req.logIn(user, (loginErr) => {
           if (loginErr) return next(loginErr);
           clearLoginAttempts(req);
+
+          // The native shell cannot keep a cookie, so it asks for a bearer
+          // token by identifying itself. Web clients get the cookie only.
+          const client = String(req.headers["x-jobdeck-client"] ?? "");
+          if (client === "native") {
+            const platform = String(req.headers["x-jobdeck-platform"] ?? "") || null;
+            return res.json({ ...user, token: mintToken(user.companyId, user.id, platform) });
+          }
           res.json(user);
         });
       });
@@ -99,6 +110,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.post("/api/logout", (req, res, next) => {
+    // Revoke the bearer too, or signing out on the phone leaves a credential
+    // that still works.
+    const header = req.headers.authorization;
+    if (header?.startsWith("Bearer ")) revokeToken(header.slice(7).trim());
+
     req.logout((err) => {
       if (err) return next(err);
       req.session.destroy((destroyErr) => {
@@ -175,6 +191,51 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // ── Accept an invite / reset token: set a password and sign in ──
+  // Unauthenticated by necessity, and the only path besides signup and the
+  // seed script that can create a login. Without it a shop signs up, adds
+  // eight people, and none of them can sign in.
+  app.post("/api/accept-invite", loginThrottle, async (req, res, next) => {
+    const body = z
+      .object({ token: z.string().min(10), email: z.string().trim().email(), password: z.string().min(8) })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ message: "Check the form", errors: body.error.flatten() });
+
+    const claim = storage.consumeInvite(body.data.token);
+    if (!claim) return res.status(410).json({ message: "That invite link has expired or was already used." });
+
+    const loginEmail = body.data.email.toLowerCase();
+    const taken = storage.getEmployeeByLogin(loginEmail);
+    if (taken && taken.id !== claim.employeeId) {
+      return res.status(409).json({ message: "That email is already registered." });
+    }
+
+    try {
+      storage.setLogin(claim.companyId, claim.employeeId, loginEmail, await hashPassword(body.data.password));
+      const user = storage.getEmployee(claim.companyId, claim.employeeId);
+      if (!user) return res.status(404).json({ message: "Employee not found" });
+
+      req.session.regenerate((regenErr) => {
+        if (regenErr) return next(regenErr);
+        req.logIn(user, (loginErr) => (loginErr ? next(loginErr) : res.json(user)));
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ── Client config, unauthenticated ──
+  // A shipped App Store build runs whatever Apple approved weeks ago and cannot
+  // be rolled forward. This lets the server tell an old build to update, and
+  // lets the API base move (to the LLC's own domain, say) without a release.
+  app.get("/api/client-config", (_req, res) => {
+    res.json({
+      minBuild: Number(process.env.MIN_CLIENT_BUILD ?? 0),
+      apiBase: process.env.PUBLIC_API_BASE ?? null,
+      push: { publicKey: pushStatus().publicKey },
+    });
+  });
+
   // ═══════════════════ THE GATE ═══════════════════
   // Mounted on the /api prefix rather than repeated per route, so a route added
   // later is protected by default instead of by whoever remembers. Everything
@@ -188,13 +249,24 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ id: company.id, name: company.name, slug: company.slug });
   });
 
+  /** Only the company owner may invite, or change who holds a login. */
+  function isOwner(req: Request): boolean {
+    const company = storage.getCompany(tenant(req));
+    return Boolean(company && company.ownerEmployeeId === actor(req).id);
+  }
+
+  function requireOwner(req: Request, res: Response, next: NextFunction) {
+    if (!isOwner(req)) return res.status(403).json({ message: "Only the account owner can do that." });
+    next();
+  }
+
   // ═══════════════════ EMPLOYEES ═══════════════════
   app.get("/api/employees", (req, res) => {
     res.json(storage.getAllEmployees(tenant(req)));
   });
 
   app.get("/api/employees/:id", (req, res) => {
-    const emp = storage.getEmployee(tenant(req), parseInt(req.params.id, 10));
+    const emp = storage.getEmployee(tenant(req), parseInt(String(req.params.id), 10));
     if (!emp) return res.status(404).json({ message: "Employee not found" });
     res.json(emp);
   });
@@ -209,13 +281,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.patch("/api/employees/:id", (req, res) => {
     const result = insertEmployeeSchema.partial().safeParse(req.body);
     if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
-    const emp = storage.updateEmployee(tenant(req), parseInt(req.params.id, 10), result.data);
+    const emp = storage.updateEmployee(tenant(req), parseInt(String(req.params.id), 10), result.data);
     if (!emp) return res.status(404).json({ message: "Employee not found" });
     res.json(emp);
   });
 
   app.delete("/api/employees/:id", (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     const emp = storage.getEmployee(tenant(req), id);
     if (!emp) return res.status(404).json({ message: "Employee not found" });
 
@@ -247,12 +319,182 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     return Boolean(storage.getEmployee(tenant(req), assignedTo));
   }
 
+  // ── Invite a crew member / reset a password ──
+  app.post("/api/employees/:id/invite", requireOwner, (req, res) => {
+    const id = parseInt(String(req.params.id), 10);
+    const emp = storage.getEmployee(tenant(req), id);
+    if (!emp) return res.status(404).json({ message: "Employee not found" });
+
+    const purpose = emp.loginEmail || emp.username ? "reset" : "invite";
+    const token = storage.createInvite(tenant(req), id, purpose, actor(req).id);
+
+    // Returned once, to the owner, who passes it on however they like. No mail
+    // server is configured and inventing one is a bigger decision than this.
+    res.json({
+      purpose,
+      link: `/#/accept-invite?token=${token}`,
+      expiresInDays: 7,
+      name: emp.name,
+    });
+  });
+
+  // ═══════════════════ PUSH ═══════════════════
+  app.get("/api/push/status", (req, res) => {
+    const status = pushStatus();
+    res.json({ ...status, myDevices: storage.countDevices(tenant(req), actor(req).id) });
+  });
+
+  app.post("/api/push/register", (req, res) => {
+    const body = z
+      .object({
+        transport: z.enum(["web", "apns", "fcm"]),
+        endpoint: z.string().min(8),
+        p256dh: z.string().nullable().optional(),
+        auth: z.string().nullable().optional(),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ message: "Invalid subscription" });
+
+    storage.registerDevice(tenant(req), actor(req).id, body.data);
+    res.status(204).end();
+  });
+
+  app.post("/api/push/unregister", (req, res) => {
+    const endpoint = String(req.body?.endpoint ?? "");
+    if (!endpoint) return res.status(400).json({ message: "Missing endpoint" });
+    storage.removeDevice(tenant(req), endpoint);
+    res.status(204).end();
+  });
+
+  /** Send a test push to the caller's own devices — the fastest way to tell
+   *  "notifications are off" from "the sweep is broken". */
+  app.post("/api/push/test", async (req, res) => {
+    const devices = storage.countDevices(tenant(req), actor(req).id);
+    if (!devices) return res.status(409).json({ message: "No device registered on this account yet." });
+    const { runTestPush } = await import("./reminders-test");
+    const sent = await runTestPush(tenant(req), actor(req).id, actor(req).name);
+    res.json({ devices, sent });
+  });
+
+  // ═══════════════════ JOB PHOTOS, CONTACTS, NOTES ═══════════════════
+  app.get("/api/jobs/:id/photos", (req, res) => {
+    const jobId = parseInt(String(req.params.id), 10);
+    if (!storage.getJob(tenant(req), jobId)) return res.status(404).json({ message: "Job not found" });
+    res.json(storage.listPhotos(tenant(req), jobId));
+  });
+
+  app.get("/api/photos/:id/:size", (req, res) => {
+    const size = String(req.params.size) === "thumb" ? "thumb" : "full";
+    const photo = storage.getPhotoBytes(tenant(req), parseInt(String(req.params.id), 10), size);
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+    res.setHeader("Content-Type", photo.mime);
+    res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    res.send(photo.bytes);
+  });
+
+  app.post("/api/jobs/:id/photos", (req, res) => {
+    const jobId = parseInt(String(req.params.id), 10);
+    if (!storage.getJob(tenant(req), jobId)) return res.status(404).json({ message: "Job not found" });
+    if (storage.countPhotos(tenant(req), jobId) >= MAX_PHOTOS_PER_JOB) {
+      return res.status(409).json({ message: `That job already has ${MAX_PHOTOS_PER_JOB} photos.` });
+    }
+
+    const full = decodeImage(String(req.body?.dataUrl ?? ""), MAX_PHOTO_BYTES);
+    const thumb = decodeImage(String(req.body?.thumbUrl ?? ""), 200_000);
+    if ("error" in full) return res.status(full.status).json({ message: full.error });
+    if ("error" in thumb) return res.status(thumb.status).json({ message: thumb.error });
+
+    const caption = typeof req.body?.caption === "string" ? req.body.caption.trim().slice(0, 300) : null;
+    res.status(201).json(
+      storage.addPhoto(tenant(req), jobId, full.mime, full.bytes, thumb.bytes, caption || null, actor(req).id),
+    );
+  });
+
+  app.delete("/api/photos/:id", (req, res) => {
+    if (!storage.deletePhoto(tenant(req), parseInt(String(req.params.id), 10))) {
+      return res.status(404).json({ message: "Photo not found" });
+    }
+    res.status(204).end();
+  });
+
+  app.get("/api/jobs/:id/contacts", (req, res) => {
+    const jobId = parseInt(String(req.params.id), 10);
+    if (!storage.getJob(tenant(req), jobId)) return res.status(404).json({ message: "Job not found" });
+    res.json(storage.listContacts(tenant(req), jobId));
+  });
+
+  app.post("/api/contacts", (req, res) => {
+    const result = insertContactSchema.safeParse(req.body);
+    if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
+    if (!storage.getJob(tenant(req), result.data.jobId)) {
+      return res.status(400).json({ message: "That job isn't on your board" });
+    }
+    res.status(201).json(storage.addContact(tenant(req), result.data));
+  });
+
+  app.delete("/api/contacts/:id", (req, res) => {
+    if (!storage.deleteContact(tenant(req), parseInt(String(req.params.id), 10))) {
+      return res.status(404).json({ message: "Contact not found" });
+    }
+    res.status(204).end();
+  });
+
+  app.get("/api/jobs/:id/notes", (req, res) => {
+    const jobId = parseInt(String(req.params.id), 10);
+    if (!storage.getJob(tenant(req), jobId)) return res.status(404).json({ message: "Job not found" });
+    res.json(storage.listNotes(tenant(req), jobId));
+  });
+
+  app.post("/api/notes", (req, res) => {
+    const result = insertNoteSchema.safeParse(req.body);
+    if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
+    const job = storage.getJob(tenant(req), result.data.jobId);
+    if (!job) return res.status(400).json({ message: "That job isn't on your board" });
+
+    const me = actor(req);
+    const note = storage.addNote(tenant(req), result.data, me.id);
+    storage.logActivity(tenant(req), {
+      jobId: job.id, jobNumber: job.jobNumber, jobName: job.jobName,
+      employeeId: me.id, action: "note",
+      details: `${me.name} added a field note`,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(201).json(note);
+  });
+
+  app.delete("/api/notes/:id", (req, res) => {
+    if (!storage.deleteNote(tenant(req), parseInt(String(req.params.id), 10))) {
+      return res.status(404).json({ message: "Note not found" });
+    }
+    res.status(204).end();
+  });
+
   // ═══════════════════ AVATARS ═══════════════════
   //
   // The browser resizes and re-encodes the picture to a small square before it
   // gets here, so the upload is a JSON data URL rather than a multipart form.
   // That avoids a file-upload dependency and caps the size at the source — but
   // the checks below still assume the client is lying, because it might be.
+
+  /**
+   * Decode a base64 data URL to bytes, trusting the magic bytes rather than the
+   * declared type. Shared by avatars and job photos.
+   */
+  function decodeImage(dataUrl: string, maxBytes: number):
+    | { mime: string; bytes: Buffer }
+    | { error: string; status: number } {
+    const match = dataUrl.match(/^data:([a-z/+-]+);base64,(.+)$/i);
+    if (!match) return { error: "Expected a base64 image data URL", status: 400 };
+    if (!AVATAR_MIMES[match[1]]) return { error: "Use a JPEG, PNG or WebP image", status: 415 };
+
+    const bytes = Buffer.from(match[2], "base64");
+    if (!bytes.length) return { error: "Image was empty", status: 400 };
+    if (bytes.length > maxBytes) return { error: "That image is too large", status: 413 };
+
+    const actual = sniff(bytes);
+    if (!actual) return { error: "That file isn't a valid image", status: 415 };
+    return { mime: actual, bytes };
+  }
 
   const AVATAR_MIMES: Record<string, string> = {
     "image/jpeg": "jpeg",
@@ -271,7 +513,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   }
 
   app.get("/api/employees/:id/avatar", (req, res) => {
-    const avatar = storage.getAvatar(tenant(req), parseInt(req.params.id, 10));
+    const avatar = storage.getAvatar(tenant(req), parseInt(String(req.params.id), 10));
     if (!avatar) return res.status(404).json({ message: "No profile picture" });
 
     // Keyed on the upload time so a new picture busts the cache immediately
@@ -286,7 +528,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.put("/api/employees/:id/avatar", (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     if (!storage.getEmployee(tenant(req), id)) return res.status(404).json({ message: "Employee not found" });
 
     const dataUrl = typeof req.body?.dataUrl === "string" ? req.body.dataUrl : "";
@@ -313,7 +555,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/employees/:id/avatar", (req, res) => {
-    const removed = storage.deleteAvatar(tenant(req), parseInt(req.params.id, 10));
+    const removed = storage.deleteAvatar(tenant(req), parseInt(String(req.params.id), 10));
     if (!removed) return res.status(404).json({ message: "No profile picture" });
     res.status(204).end();
   });
@@ -334,7 +576,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.get("/api/jobs/:id", (req, res) => {
-    const job = storage.getJob(tenant(req), parseInt(req.params.id, 10));
+    const job = storage.getJob(tenant(req), parseInt(String(req.params.id), 10));
     if (!job) return res.status(404).json({ message: "Job not found" });
     res.json(job);
   });
@@ -368,7 +610,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.patch("/api/jobs/:id", (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     const oldJob = storage.getJob(tenant(req), id);
     if (!oldJob) return res.status(404).json({ message: "Job not found" });
 
@@ -416,7 +658,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/jobs/:id", (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     const job = storage.getJob(tenant(req), id);
     if (!job) return res.status(404).json({ message: "Job not found" });
 
@@ -447,7 +689,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   /** The viewer's own date, used for overdue/today. Never computed here. */
   function viewerToday(req: Request): string {
-    const supplied = String(req.query.today ?? "");
+    // Header first, query second. The header keeps "today" out of the query
+    // key, so a cache persisted yesterday still matches this morning's
+    // request — the offline read otherwise fails on exactly the day it
+    // matters, because the key contains a date never fetched.
+    const supplied = String(req.headers["x-jobdeck-today"] ?? req.query.today ?? "");
     if (/^\d{4}-\d{2}-\d{2}$/.test(supplied)) return supplied;
     // A client that forgot to send one still gets something sane, but the
     // server runs UTC so this can be a day ahead of Pennsylvania after 8pm.
@@ -456,14 +702,31 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   app.get("/api/tasks", (req, res) => {
     const view = String(req.query.view ?? "open");
-    if (!["open", "today", "upcoming", "done", "all"].includes(view)) {
+    if (!["open", "today", "upcoming", "done", "all", "range"].includes(view)) {
       return res.status(400).json({ message: "Unknown view" });
+    }
+
+    const from = String(req.query.from ?? "");
+    const to = String(req.query.to ?? "");
+    if (view === "range") {
+      const valid = /^\d{4}-\d{2}-\d{2}$/;
+      if (!valid.test(from) || !valid.test(to)) {
+        return res.status(400).json({ message: "range needs from and to as YYYY-MM-DD" });
+      }
+      // A bounded window: an unbounded range is a whole-table scan served as
+      // JSON, which on a 4G truck connection is the same as broken.
+      const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
+      if (days < 0 || days > 92) {
+        return res.status(400).json({ message: "range must be 0-92 days" });
+      }
     }
     const rawAssignee = req.query.assignedTo;
     res.json(
       storage.getTasks(tenant(req), {
         view: view as any,
         today: viewerToday(req),
+        from: from || undefined,
+        to: to || undefined,
         jobId: req.query.jobId ? parseInt(String(req.query.jobId), 10) : undefined,
         priority: req.query.priority ? (String(req.query.priority) as any) : undefined,
         assignedTo:
@@ -477,7 +740,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.get("/api/tasks/:id", (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     // A non-numeric id means the caller built a bad URL. Say so, rather than
     // returning the 404 that looks like "no such task".
     if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid task id" });
@@ -517,7 +780,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.patch("/api/tasks/:id", (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     if (!storage.getTask(tenant(req), id)) return res.status(404).json({ message: "Task not found" });
 
     const result = insertTaskSchema.partial().safeParse(req.body);
@@ -536,7 +799,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   app.post("/api/tasks/:id/complete", (req, res) => {
     const me = actor(req);
-    const done = storage.completeTask(tenant(req), parseInt(req.params.id, 10), me.id);
+    const done = storage.completeTask(tenant(req), parseInt(String(req.params.id), 10), me.id);
     if (!done) return res.status(404).json({ message: "Task not found" });
 
     const job = storage.getJob(tenant(req), done.task.jobId);
@@ -559,13 +822,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.post("/api/tasks/:id/reopen", (req, res) => {
-    const task = storage.reopenTask(tenant(req), parseInt(req.params.id, 10));
+    const task = storage.reopenTask(tenant(req), parseInt(String(req.params.id), 10));
     if (!task) return res.status(404).json({ message: "Task not found" });
     res.json(task);
   });
 
   app.delete("/api/tasks/:id", (req, res) => {
-    const removed = storage.deleteTask(tenant(req), parseInt(req.params.id, 10));
+    const removed = storage.deleteTask(tenant(req), parseInt(String(req.params.id), 10));
     if (!removed) return res.status(404).json({ message: "Task not found" });
     res.status(204).end();
   });

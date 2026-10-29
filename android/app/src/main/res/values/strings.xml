@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    \1Jobdeck\2
+    \1Jobdeck\2
+    <string name="package_name">builds.grant.jobdeck</string>
+    <string name="custom_url_scheme">builds.grant.jobdeck</string>
+</resources>

@@ -70,7 +70,7 @@ export default function Dashboard() {
   // doesn't fire 57 of them.
   const today = localToday();
   const { data: taskSummary = {} } = useQuery<Record<string, { open: number; overdue: number; nextDue: string | null }>>({
-    queryKey: [`/api/jobs/task-summary?today=${today}`],
+    queryKey: ["/api/jobs/task-summary"],
   });
   const activeEmployees = employees.filter((e) => e.active);
 

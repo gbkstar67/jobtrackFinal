@@ -6,6 +6,7 @@ import { Strategy as LocalStrategy } from "passport-local";
 import type { Express, Request, Response, NextFunction } from "express";
 import { sqlite } from "./db";
 import { createSessionStore } from "./session-store";
+import { bearerAuth } from "./bearer";
 import { storage } from "./storage";
 import type { Employee } from "@shared/schema";
 
@@ -235,6 +236,12 @@ export function setupAuth(app: Express) {
 
   app.use(passport.initialize());
   app.use(passport.session());
+
+  // Bearer tokens stand in for the session on native, where WKWebView will not
+  // persist Set-Cookie from capacitor://localhost. Mounted AFTER passport so a
+  // cookie session wins, and before the /api gate so req.user is populated
+  // either way — no downstream route needs to know which credential was used.
+  app.use(bearerAuth);
 }
 
 // ══════════════════════════ GATE ══════════════════════════

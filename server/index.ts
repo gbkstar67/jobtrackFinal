@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupAuth } from "./auth";
+import { startReminderSweep } from "./reminders";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
@@ -18,7 +19,8 @@ app.use(
     // Profile pictures arrive as base64 data URLs, which inflate the bytes by
     // about a third. The default 100kb limit would reject them before the
     // route's own size check ran. The route still enforces MAX_AVATAR_BYTES.
-    limit: "1mb",
+    // Job photos are ~1600px JPEGs; base64 inflates them by a third.
+    limit: "8mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
@@ -37,6 +39,37 @@ export function log(message: string, source = "express") {
 
   console.log(`${formattedTime} [${source}] ${message}`);
 }
+
+/**
+ * CORS for the native shell only.
+ *
+ * Capacitor serves the bundle from capacitor://localhost (iOS) and
+ * http://localhost (Android), so every API call is cross-origin. Those two
+ * origins are allowlisted explicitly — never a wildcard, and never with
+ * credentials, because native authenticates with a bearer token and the web
+ * app is same-origin and unaffected.
+ */
+const NATIVE_ORIGINS = new Set([
+  "capacitor://localhost",
+  "ionic://localhost",
+  "http://localhost",
+]);
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && NATIVE_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Jobdeck-Client, X-Jobdeck-Platform, X-Jobdeck-Build, X-Jobdeck-Today, X-Admin-Token");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    // Deliberately NO Access-Control-Allow-Credentials: native sends a bearer
+    // token with credentials mode "omit", so allowing them would be a claim we
+    // do not need to make.
+    if (req.method === "OPTIONS") return res.status(204).end();
+  }
+  next();
+});
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -71,6 +104,10 @@ app.use((req, res, next) => {
   setupAuth(app);
 
   await registerRoutes(httpServer, app);
+
+  // Reminders: in-process, one replica, one SQLite file. A separate worker
+  // would need its own handle on the same volume for no benefit.
+  startReminderSweep();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

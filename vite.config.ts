@@ -4,6 +4,14 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // Baked at build time. __API_BASE__ is only read on native, where relative
+    // URLs would resolve against capacitor://localhost; the web build ignores
+    // it. __BUILD_NUMBER__ lets the server tell an old App Store build to
+    // update, since those cannot be rolled forward.
+    __API_BASE__: JSON.stringify(process.env.VITE_API_BASE ?? "https://trackjobs.up.railway.app"),
+    __BUILD_NUMBER__: JSON.stringify(Number(process.env.VITE_BUILD_NUMBER ?? 1)),
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),

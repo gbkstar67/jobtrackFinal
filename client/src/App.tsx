@@ -5,6 +5,9 @@ import { queryClient, getQueryFn, ME_KEY } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import Dashboard from "./pages/Dashboard";
 import TasksPage from "./pages/TasksPage";
+import CalendarPage from "./pages/CalendarPage";
+import SettingsPage from "./pages/SettingsPage";
+import AcceptInvite from "./pages/AcceptInvite";
 import JobDetail from "./pages/JobDetail";
 import TeamPage from "./pages/TeamPage";
 import ActivityPage from "./pages/ActivityPage";
@@ -33,6 +36,8 @@ function AuthenticatedApp() {
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/tasks" component={TasksPage} />
+        <Route path="/calendar" component={CalendarPage} />
+        <Route path="/settings" component={SettingsPage} />
         <Route path="/job/:id" component={JobDetail} />
         <Route path="/team" component={TeamPage} />
         <Route path="/activity" component={ActivityPage} />
@@ -57,6 +62,10 @@ function AuthGate() {
   if (isLoading) {
     return <div className="min-h-screen" />;
   }
+
+  // The invite link must work for someone who has no session yet — that is the
+  // entire point of it.
+  if (!user && window.location.hash.startsWith("#/accept-invite")) return <AcceptInvite />;
 
   return user ? <AuthenticatedApp /> : <Login />;
 }

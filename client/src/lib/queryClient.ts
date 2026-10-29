@@ -1,6 +1,15 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+import { apiBase, isNative, platformHeaders } from "@/lib/native";
+
+/**
+ * Native authenticates with a bearer token, so credentials mode is "omit":
+ * sending "include" cross-origin would require Access-Control-Allow-Credentials
+ * on every response, and without it the browser discards the response as a
+ * network error — every call failing with an opaque CORS message while curl
+ * against the same server passes.
+ */
+const creds = (): RequestCredentials => (isNative() ? "omit" : "include");
 
 /** Query key for the session check, shared by the auth gate and the 401 handler. */
 export const ME_KEY = ["/api/me"] as const;
@@ -34,14 +43,14 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const res = await fetch(`${API_BASE}${url}`, {
+  const res = await fetch(`${apiBase()}${url}`, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: { ...(data ? { "Content-Type": "application/json" } : {}), ...platformHeaders() },
     body: data ? JSON.stringify(data) : undefined,
     // Send the session cookie. Same-origin would cover the deployed app, but
     // API_BASE can point at a different port in dev, and a dropped cookie there
     // looks exactly like a broken login.
-    credentials: "include",
+    credentials: creds(),
   });
 
   await throwIfResNotOk(res);
@@ -61,7 +70,10 @@ export const getQueryFn: <T>(options: {
     if (path.indexOf("?") !== -1 && path.indexOf("?") !== path.lastIndexOf("/") - 0 && /\?[^/]*\//.test(path)) {
       throw new Error(`Query key builds an invalid URL (params before a path segment): ${path}`);
     }
-    const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+    const res = await fetch(`${apiBase()}${path}`, {
+      credentials: creds(),
+      headers: platformHeaders(),
+    });
 
     if (res.status === 401) {
       if (unauthorizedBehavior === "returnNull") return null;

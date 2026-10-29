@@ -5,6 +5,7 @@ import { useLocation, useParams } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import AppShell from "@/components/AppShell";
 import Avatar from "@/components/Avatar";
+import { JobPhotos, JobContacts, JobNotes } from "@/components/JobExtras";
 import { getInitials } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -440,6 +441,12 @@ export default function JobDetail() {
         </div>
 
         {/* Activity feed for this job */}
+        <JobPhotos jobId={Number(id)} />
+
+        <JobContacts jobId={Number(id)} />
+
+        <JobNotes jobId={Number(id)} employees={empMap} />
+
         <div className="sheet-card overflow-hidden">
           <div className="px-5 py-3 border-b border-border">
             <h2 className="font-display font-extrabold text-sm text-foreground uppercase tracking-widest flex items-center gap-2">

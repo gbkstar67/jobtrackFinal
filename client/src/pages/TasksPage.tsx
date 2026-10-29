@@ -30,7 +30,9 @@ export default function TasksPage() {
 
   const today = localToday();
 
-  const params = new URLSearchParams({ view, today });
+  // today is sent as a header, not a param: keeping it out of the key is what
+  // lets a persisted cache survive into the next morning.
+  const params = new URLSearchParams({ view });
   if (jobFilter !== "all") params.set("jobId", jobFilter);
   if (assigneeFilter !== "all") params.set("assignedTo", assigneeFilter);
 

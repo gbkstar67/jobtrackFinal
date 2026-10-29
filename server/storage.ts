@@ -1,11 +1,14 @@
+import nodeCrypto from "crypto";
 import { db, sqlite } from "./db";
 import {
-  jobs, employees, activityLog, companies, tasks, employeePublicColumns,
+  jobs, employees, activityLog, companies, tasks,
+  jobContacts, jobNotes, employeePublicColumns,
   type Job, type InsertJob,
   type Employee, type EmployeeRow, type InsertEmployee,
   type Activity, type InsertActivity,
   type Company,
   type Task, type InsertTask, type RepeatRule,
+  type JobPhoto, type JobContact, type InsertContact, type JobNote, type InsertNote,
 } from "@shared/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 
@@ -48,6 +51,27 @@ export interface IStorage {
   getActivities(companyId: number, jobId?: number): Activity[];
   logActivity(companyId: number, entry: InsertActivity): Activity;
 
+  // Invites, devices, photos, contacts, notes
+  createInvite(companyId: number, employeeId: number, purpose: string, createdBy: number): string;
+  consumeInvite(token: string): { companyId: number; employeeId: number } | undefined;
+  setLogin(companyId: number, employeeId: number, loginEmail: string, passwordHash: string): boolean;
+  registerDevice(companyId: number, employeeId: number, d: { transport: string; endpoint: string; p256dh?: string | null; auth?: string | null }): void;
+  removeDevice(companyId: number, endpoint: string): boolean;
+  countDevices(companyId: number, employeeId: number): number;
+
+  listPhotos(companyId: number, jobId: number): JobPhoto[];
+  getPhotoBytes(companyId: number, id: number, which: "full" | "thumb"): { mime: string; bytes: Buffer } | undefined;
+  addPhoto(companyId: number, jobId: number, mime: string, bytes: Buffer, thumb: Buffer, caption: string | null, takenBy: number): JobPhoto;
+  deletePhoto(companyId: number, id: number): boolean;
+
+  listContacts(companyId: number, jobId: number): JobContact[];
+  addContact(companyId: number, c: InsertContact): JobContact;
+  deleteContact(companyId: number, id: number): boolean;
+
+  listNotes(companyId: number, jobId: number): JobNote[];
+  addNote(companyId: number, n: InsertNote, authorId: number): JobNote;
+  deleteNote(companyId: number, id: number): boolean;
+
   // Tasks
   getTasks(companyId: number, opts?: TaskQuery): Task[];
   getTask(companyId: number, id: number): Task | undefined;
@@ -65,8 +89,11 @@ export interface IStorage {
  * roll over at 8pm in Pennsylvania and show tomorrow's work as due now.
  */
 export interface TaskQuery {
-  view?: "open" | "today" | "upcoming" | "done" | "all";
+  view?: "open" | "today" | "upcoming" | "done" | "all" | "range";
   today?: string;
+  /** For view=range: inclusive YYYY-MM-DD bounds of the visible window. */
+  from?: string;
+  to?: string;
   jobId?: number;
   assignedTo?: number | "unassigned";
   priority?: "normal" | "urgent";
@@ -280,10 +307,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   deleteJob(companyId: number, id: number): boolean {
-    return db
-      .delete(jobs)
-      .where(and(eq(jobs.id, id), eq(jobs.companyId, companyId)))
-      .run().changes > 0;
+    // Tasks, photos, contacts and notes all hang off the job. Without this they
+    // survive it, scoped to a job_id that resolves to nothing — the task list
+    // would show work for a job that is no longer on the board. activity_log is
+    // deliberately NOT included: it carries job_number and job_name precisely so
+    // the trail outlives the job.
+    return db.transaction((tx) => {
+      const existing = this.getJob(companyId, id);
+      if (!existing) return false;
+      sqlite.prepare("DELETE FROM tasks WHERE company_id = ? AND job_id = ?").run(companyId, id);
+      sqlite.prepare("DELETE FROM job_photos WHERE company_id = ? AND job_id = ?").run(companyId, id);
+      sqlite.prepare("DELETE FROM job_contacts WHERE company_id = ? AND job_id = ?").run(companyId, id);
+      sqlite.prepare("DELETE FROM job_notes WHERE company_id = ? AND job_id = ?").run(companyId, id);
+      return tx.delete(jobs).where(and(eq(jobs.id, id), eq(jobs.companyId, companyId))).run().changes > 0;
+    });
   }
 
   /**
@@ -315,10 +352,168 @@ export class DatabaseStorage implements IStorage {
     return db.insert(activityLog).values({ ...entry, companyId }).returning().get();
   }
 
+  // ── Invites and logins ──
+  // Only the hash is stored, so a copy of the database cannot be replayed into
+  // a login. The plaintext is returned exactly once, to the caller.
+  createInvite(companyId: number, employeeId: number, purpose: string, createdBy: number): string {
+    const token = nodeCrypto.randomBytes(32).toString("base64url");
+    const now = new Date();
+    sqlite
+      .prepare(
+        `INSERT INTO invites (company_id, employee_id, token_hash, purpose, expires_at, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        companyId,
+        employeeId,
+        nodeCrypto.createHash("sha256").update(token).digest("hex"),
+        purpose,
+        new Date(now.getTime() + 7 * 86_400_000).toISOString(),
+        createdBy,
+        now.toISOString(),
+      );
+    return token;
+  }
+
+  /** Single use: marked spent in the same statement that reads it. */
+  consumeInvite(token: string) {
+    const hash = nodeCrypto.createHash("sha256").update(token).digest("hex");
+    const row = sqlite
+      .prepare(
+        `SELECT id, company_id AS companyId, employee_id AS employeeId, expires_at AS expiresAt, used_at AS usedAt
+           FROM invites WHERE token_hash = ?`,
+      )
+      .get(hash) as { id: number; companyId: number; employeeId: number; expiresAt: string; usedAt: string | null } | undefined;
+
+    if (!row || row.usedAt || row.expiresAt <= new Date().toISOString()) return undefined;
+    sqlite.prepare("UPDATE invites SET used_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
+    return { companyId: row.companyId, employeeId: row.employeeId };
+  }
+
+  setLogin(companyId: number, employeeId: number, loginEmail: string, passwordHash: string): boolean {
+    if (!this.getEmployee(companyId, employeeId)) return false;
+    return (
+      db
+        .update(employees)
+        .set({ loginEmail, passwordHash })
+        .where(and(eq(employees.id, employeeId), eq(employees.companyId, companyId)))
+        .run().changes > 0
+    );
+  }
+
+  // ── Push devices ──
+  registerDevice(companyId: number, employeeId: number, d: { transport: string; endpoint: string; p256dh?: string | null; auth?: string | null }) {
+    sqlite
+      .prepare(
+        `INSERT INTO push_devices (company_id, employee_id, transport, endpoint, p256dh, auth, last_seen_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(transport, endpoint) DO UPDATE SET
+           company_id = excluded.company_id,
+           employee_id = excluded.employee_id,
+           p256dh = excluded.p256dh,
+           auth = excluded.auth,
+           failure_count = 0,
+           last_seen_at = excluded.last_seen_at`,
+      )
+      .run(companyId, employeeId, d.transport, d.endpoint, d.p256dh ?? null, d.auth ?? null,
+           new Date().toISOString(), new Date().toISOString());
+  }
+
+  removeDevice(companyId: number, endpoint: string): boolean {
+    return sqlite
+      .prepare("DELETE FROM push_devices WHERE company_id = ? AND endpoint = ?")
+      .run(companyId, endpoint).changes > 0;
+  }
+
+  countDevices(companyId: number, employeeId: number): number {
+    return (
+      sqlite
+        .prepare("SELECT COUNT(*) AS n FROM push_devices WHERE company_id = ? AND employee_id = ?")
+        .get(companyId, employeeId) as { n: number }
+    ).n;
+  }
+
+  // ── Job photos ──
+  // Listing NEVER selects the BLOBs: a 40-photo job would otherwise pull ~25MB
+  // through the JSON response just to render a thumbnail strip.
+  listPhotos(companyId: number, jobId: number): JobPhoto[] {
+    return sqlite
+      .prepare(
+        `SELECT id, company_id AS companyId, job_id AS jobId, mime, caption,
+                taken_by AS takenBy, created_at AS createdAt
+           FROM job_photos WHERE company_id = ? AND job_id = ? ORDER BY id DESC`,
+      )
+      .all(companyId, jobId) as JobPhoto[];
+  }
+
+  getPhotoBytes(companyId: number, id: number, which: "full" | "thumb") {
+    const column = which === "thumb" ? "thumb" : "bytes";
+    return sqlite
+      .prepare(`SELECT mime, ${column} AS bytes FROM job_photos WHERE company_id = ? AND id = ?`)
+      .get(companyId, id) as { mime: string; bytes: Buffer } | undefined;
+  }
+
+  addPhoto(companyId: number, jobId: number, mime: string, bytes: Buffer, thumb: Buffer, caption: string | null, takenBy: number): JobPhoto {
+    const info = sqlite
+      .prepare(
+        `INSERT INTO job_photos (company_id, job_id, mime, bytes, thumb, caption, taken_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(companyId, jobId, mime, bytes, thumb, caption, takenBy, new Date().toISOString());
+    return this.listPhotos(companyId, jobId).find((p) => p.id === Number(info.lastInsertRowid))!;
+  }
+
+  deletePhoto(companyId: number, id: number): boolean {
+    return sqlite.prepare("DELETE FROM job_photos WHERE company_id = ? AND id = ?").run(companyId, id).changes > 0;
+  }
+
+  countPhotos(companyId: number, jobId: number): number {
+    return (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM job_photos WHERE company_id = ? AND job_id = ?")
+        .get(companyId, jobId) as { n: number }
+    ).n;
+  }
+
+  // ── Contacts ──
+  listContacts(companyId: number, jobId: number): JobContact[] {
+    return db.select().from(jobContacts)
+      .where(and(eq(jobContacts.companyId, companyId), eq(jobContacts.jobId, jobId)))
+      .orderBy(jobContacts.id).all();
+  }
+
+  addContact(companyId: number, c: InsertContact): JobContact {
+    return db.insert(jobContacts)
+      .values({ ...c, companyId, createdAt: new Date().toISOString() })
+      .returning().get();
+  }
+
+  deleteContact(companyId: number, id: number): boolean {
+    return db.delete(jobContacts)
+      .where(and(eq(jobContacts.id, id), eq(jobContacts.companyId, companyId))).run().changes > 0;
+  }
+
+  // ── Field notes ──
+  listNotes(companyId: number, jobId: number): JobNote[] {
+    return db.select().from(jobNotes)
+      .where(and(eq(jobNotes.companyId, companyId), eq(jobNotes.jobId, jobId)))
+      .orderBy(desc(jobNotes.id)).all();
+  }
+
+  addNote(companyId: number, n: InsertNote, authorId: number): JobNote {
+    return db.insert(jobNotes)
+      .values({ ...n, companyId, authorId, createdAt: new Date().toISOString() })
+      .returning().get();
+  }
+
+  deleteNote(companyId: number, id: number): boolean {
+    return db.delete(jobNotes)
+      .where(and(eq(jobNotes.id, id), eq(jobNotes.companyId, companyId))).run().changes > 0;
+  }
+
   // ── Tasks ──
 
   getTasks(companyId: number, opts: TaskQuery = {}): Task[] {
-    const { view = "open", today, jobId, assignedTo, priority } = opts;
+    const { view = "open", today, from, to, jobId, assignedTo, priority } = opts;
     const where: any[] = [eq(tasks.companyId, companyId)];
 
     if (jobId) where.push(eq(tasks.jobId, jobId));
@@ -326,7 +521,13 @@ export class DatabaseStorage implements IStorage {
     if (assignedTo === "unassigned") where.push(sql`${tasks.assignedTo} IS NULL`);
     else if (typeof assignedTo === "number") where.push(eq(tasks.assignedTo, assignedTo));
 
-    if (view === "done") {
+    if (view === "range") {
+      // The calendar window, open AND completed: a day that had three things
+      // on it should still show three, ticked off.
+      where.push(sql`${tasks.dueDate} IS NOT NULL`);
+      if (from) where.push(sql`${tasks.dueDate} >= ${from}`);
+      if (to) where.push(sql`${tasks.dueDate} <= ${to}`);
+    } else if (view === "done") {
       where.push(sql`${tasks.completedAt} IS NOT NULL`);
     } else if (view !== "all") {
       where.push(sql`${tasks.completedAt} IS NULL`);

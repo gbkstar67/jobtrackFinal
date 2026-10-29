@@ -1,5 +1,5 @@
 {
-  "name": "rest-express",
+  "name": "jobdeck",
   "version": "1.0.0",
   "license": "MIT",
   "type": "module",
@@ -8,9 +8,25 @@
     "build": "vite build && esbuild server/index.ts --platform=node --bundle --format=cjs --outfile=dist/index.cjs --define:process.env.NODE_ENV=\\\"production\\\" --minify --external:better-sqlite3",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "seed": "tsx script/seed-users.ts"
+    "seed": "tsx script/seed-users.ts",
+    "build:native": "VITE_API_BASE=${VITE_API_BASE:-https://trackjobs.up.railway.app} vite build",
+    "cap:sync": "npm run build:native && cap sync",
+    "cap:ios": "npm run cap:sync && cap open ios",
+    "cap:android": "npm run cap:sync && cap open android",
+    "cap:icons": "capacitor-assets generate --iconBackgroundColor '#ffffff' --splashBackgroundColor '#ffffff'",
+    "backup": "tsx script/backup.ts",
+    "seed:demo": "tsx script/seed-demo.ts"
   },
   "dependencies": {
+    "@capacitor/app": "7.1.0",
+    "@capacitor/camera": "7.0.2",
+    "@capacitor/core": "7.4.3",
+    "@capacitor/keyboard": "7.0.3",
+    "@capacitor/network": "7.0.2",
+    "@capacitor/preferences": "7.0.2",
+    "@capacitor/push-notifications": "7.0.3",
+    "@capacitor/splash-screen": "7.0.3",
+    "@capacitor/status-bar": "7.0.3",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@radix-ui/react-accordion": "^1.2.4",
@@ -74,6 +90,10 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@capacitor/android": "7.4.3",
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "7.4.3",
+    "@capacitor/ios": "7.4.3",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.1.18",
     "@types/better-sqlite3": "^7.6.12",

@@ -1,0 +1,14 @@
+# Without this the Dockerfile's `COPY . .` ships the native projects and local
+# build output into the server image: hundreds of MB of Xcode and Gradle
+# artefacts, plus any signing material that happens to be on disk.
+node_modules
+dist
+ios
+android
+.git
+.env
+*.db
+*.db-wal
+*.db-shm
+*.log
+.DS_Store

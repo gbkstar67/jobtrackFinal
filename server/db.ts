@@ -320,6 +320,118 @@ const MIGRATIONS: Array<(d: Database.Database) => void> = [
       CREATE INDEX IF NOT EXISTS employee_avatars_company ON employee_avatars (company_id);
     `);
   },
+
+  // ── 9: ownership, invites, devices, photos, reminders ──
+  // Confirmed against the live volume (user_version 9) before writing: this is
+  // MIGRATIONS[9] and takes it to 10. Steps 0-8 are frozen.
+  (d) => {
+    // Ownership is a column, never a role string. role is a free-text display
+    // label that any login holder can PATCH onto themselves, so authorising on
+    // it would let a crew member promote themselves and delete the company.
+    addColumn(d, "companies", "owner_employee_id", "INTEGER");
+    // One shop, one wall clock. Reminder delivery needs a zone to turn a due
+    // date into an instant; the viewer's own date still drives every UI query.
+    addColumn(d, "companies", "timezone", "TEXT NOT NULL DEFAULT 'America/New_York'");
+
+    // Backfill: the lowest-id login holder in each company.
+    d.exec(`
+      UPDATE companies SET owner_employee_id = (
+        SELECT MIN(e.id) FROM employees e
+         WHERE e.company_id = companies.id
+           AND (e.username IS NOT NULL OR e.login_email IS NOT NULL)
+      ) WHERE owner_employee_id IS NULL;
+    `);
+
+    d.exec(`
+      -- Single-use tokens for "set your password". The ONLY way a crew member
+      -- gets a login besides signup and the seed script; without it a new shop
+      -- adds eight people and none of them can sign in.
+      CREATE TABLE IF NOT EXISTS invites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        purpose TEXT NOT NULL DEFAULT 'invite',   -- 'invite' | 'reset'
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        created_by INTEGER,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS invites_company ON invites (company_id);
+
+      -- Opaque bearer tokens. The native shell cannot use the session cookie:
+      -- WKWebView will not persist Set-Cookie from capacitor://localhost.
+      CREATE TABLE IF NOT EXISTS api_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        platform TEXT,
+        last_used_at TEXT,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS api_tokens_employee ON api_tokens (employee_id);
+
+      -- Push targets. transport tells the sender which wire format to use, so
+      -- web (VAPID), iOS (APNs) and Android (FCM) coexist on one table.
+      CREATE TABLE IF NOT EXISTS push_devices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        transport TEXT NOT NULL,                  -- 'web' | 'apns' | 'fcm'
+        endpoint TEXT NOT NULL,                   -- web push URL, or device token
+        p256dh TEXT,
+        auth TEXT,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        last_seen_at TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (transport, endpoint)
+      );
+      CREATE INDEX IF NOT EXISTS push_devices_employee ON push_devices (employee_id);
+
+      -- Job photos. Capped and thumbnailed client-side; the full image and a
+      -- ~320px derivative are stored so a 40-photo job does not pull 25MB.
+      CREATE TABLE IF NOT EXISTS job_photos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        job_id INTEGER NOT NULL,
+        mime TEXT NOT NULL,
+        bytes BLOB NOT NULL,
+        thumb BLOB NOT NULL,
+        caption TEXT,
+        taken_by INTEGER,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS job_photos_job ON job_photos (company_id, job_id);
+
+      -- Job contacts: GC, engineer, vendor. One client phone per job was never
+      -- the real shape of the work.
+      CREATE TABLE IF NOT EXISTS job_contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        job_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT,
+        phone TEXT,
+        email TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS job_contacts_job ON job_contacts (company_id, job_id);
+
+      -- Dated field notes, so "what happened in March" has an answer.
+      CREATE TABLE IF NOT EXISTS job_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        job_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        author_id INTEGER,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS job_notes_job ON job_notes (company_id, job_id);
+    `);
+  },
 ];
 
 function runMigrations(d: Database.Database) {
