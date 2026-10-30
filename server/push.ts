@@ -69,15 +69,67 @@ function signRS256(header: object, claims: object, pem: string): string {
 // home-screen-installed PWA. This is what delivers reminders before the native
 // builds are through review, and it keeps working after.
 
+/**
+ * DER prefix for a PKCS8-wrapped P-256 private key, everything up to the scalar.
+ *
+ * Every VAPID generator — `npx web-push generate-vapid-keys`, the browser
+ * console one-liners, the online ones — hands you the private key as a bare
+ * 32-byte scalar in base64url, because that is what the Web Push spec talks
+ * about. OpenSSL will not load that: it carries no curve name, so there is
+ * nothing to tell a decoder it is P-256. Prepending this fixed header turns it
+ * back into something crypto.createPrivateKey accepts, and the result is
+ * byte-identical to the key the generator held.
+ */
+const P256_PKCS8_PREFIX = Buffer.from(
+  "3041020100301306072a8648ce3d020106082a8648ce3d030107042730250201010420",
+  "hex",
+);
+
+/**
+ * The VAPID signing key, in whichever shape it was pasted into the environment.
+ *
+ * Accepts a PKCS8 PEM, a base64 PKCS8 DER, or — the common case — the raw
+ * 32-byte scalar that generators emit. Getting this wrong is expensive to
+ * diagnose: a key the loader rejects does not raise, it just makes every push
+ * report "VAPID not configured", which reads like a missing variable rather
+ * than an unreadable one.
+ */
 function vapidKey(): crypto.KeyObject | null {
-  const pem = process.env.VAPID_PRIVATE_KEY;
-  if (!pem) return null;
+  const supplied = process.env.VAPID_PRIVATE_KEY?.trim();
+  if (!supplied) return null;
+
+  if (supplied.includes("BEGIN")) {
+    try {
+      return crypto.createPrivateKey(supplied);
+    } catch {
+      return null;
+    }
+  }
+
+  const raw = Buffer.from(supplied, "base64url");
+
+  if (raw.length === 32) {
+    try {
+      return crypto.createPrivateKey({
+        key: Buffer.concat([P256_PKCS8_PREFIX, raw]),
+        format: "der",
+        type: "pkcs8",
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  // Long enough to be a DER structure, or a PEM that was base64'd a second time
+  // on its way into the environment.
   try {
-    return crypto.createPrivateKey(
-      pem.includes("BEGIN") ? pem : Buffer.from(pem, "base64url"),
-    );
+    return crypto.createPrivateKey({ key: raw, format: "der", type: "pkcs8" });
   } catch {
-    return null;
+    try {
+      return crypto.createPrivateKey(raw.toString("utf8"));
+    } catch {
+      return null;
+    }
   }
 }
 
